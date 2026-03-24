@@ -98,11 +98,20 @@ class TrendStrategy(IStrategy):
             if moved_pct > self.max_late_entry_pct:
                 return signals
 
-        # Check for pullback entry
+        # Mode 1: Pullback entry (conservative)
         entry_signal = self._check_pullback_entry(features, price, is_bullish, is_bearish,
                                                   regime, governor)
         if entry_signal:
             signals.append(entry_signal)
+            return signals
+
+        # Mode 2: Momentum entry (when pullback never comes)
+        # Auditor: "system that avoids losses AND avoids gains = worst scenario"
+        if not entry_signal and regime.confidence > 0.7:
+            momentum_signal = self._check_momentum_entry(features, price, is_bullish,
+                                                         is_bearish, regime, governor)
+            if momentum_signal:
+                signals.append(momentum_signal)
 
         return signals
 
@@ -174,6 +183,71 @@ class TrendStrategy(IStrategy):
                 "stop_loss": stop_price,
                 "trend_direction": "bullish" if is_bullish else "bearish",
                 "entries_this_cycle": self._entries_this_cycle,
+            },
+        )
+
+    def _check_momentum_entry(self, features: Features, price: float,
+                              is_bullish: bool, is_bearish: bool,
+                              regime: RegimeState, governor: GovernorDecision):
+        """Mode 2: Momentum entry when pullback never comes.
+
+        Auditor: "in strong trend without pullback, allow small breakout entry"
+        Activates when: TREND_STRONG, confidence > 0.7, price far from SMA,
+        and price accelerating in trend direction.
+
+        Size: 50% of normal (smaller = safer for momentum)
+        Stop: tighter (1.0 * ATR instead of 1.5)
+        """
+        # Only if price is far from SMA (pullback isn't coming)
+        if abs(features.price_vs_sma20_pct) < 0.5:
+            return None  # still close to SMA, wait for pullback
+
+        # Need acceleration in trend direction
+        if is_bullish and features.momentum_1h < 0.3:
+            return None
+        if is_bearish and features.momentum_1h > -0.3:
+            return None
+
+        # Need volume confirmation
+        if features.volume_ratio < 1.2:
+            return None
+
+        # Size: 50% of pullback entry (smaller position for riskier entry)
+        capital = 130.0
+        size_pct = self.trend_size_pct * 0.5 * regime.confidence
+        size_pct = min(size_pct, governor.max_exposure_pct / 3)
+        size_usdt = capital * size_pct / 100
+        amount = round(size_usdt / price, 5) if price > 0 else 0
+
+        if amount <= 0 or size_usdt < 10:
+            return None
+
+        # Tighter stop for momentum entry (1.0 * ATR vs 1.5 for pullback)
+        atr_stop = features.atr * 1.0 if features.atr > 0 else price * 0.008
+        pct_stop = price * 0.8 / 100  # 0.8% absolute cap (tighter than pullback's 1.2%)
+        stop_distance = min(atr_stop, pct_stop)
+
+        if is_bullish:
+            stop_price = round(price - stop_distance, 1)
+        else:
+            stop_price = round(price + stop_distance, 1)
+
+        self._entries_this_cycle += 1
+        side = "buy" if is_bullish else "sell"
+
+        return Signal(
+            side=side,
+            price=round(price * (0.999 if is_bullish else 1.001), 1),
+            amount=amount,
+            order_type="limit",
+            source="TREND",
+            confidence=regime.confidence * 0.8,  # lower confidence for momentum
+            metadata={
+                "entry_type": "momentum",
+                "stop_loss": stop_price,
+                "trend_direction": "bullish" if is_bullish else "bearish",
+                "entries_this_cycle": self._entries_this_cycle,
+                "size_reduction": "50%",
             },
         )
 

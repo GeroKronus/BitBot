@@ -50,16 +50,17 @@ class GridStrategy(IStrategy):
         if price <= 0:
             return signals
 
-        # ===== NO TRADE ZONE (ChatGPT 3.2: "energy check") =====
-        # Skip if expected move < cost × 2 (not enough energy to profit)
+        # ===== LOW ENERGY MODE (auditor: "operate small instead of zero") =====
         round_trip_cost = (0.05 + 0.05) * 2  # 0.20%
         expected_move = features.atr_pct if features.atr_pct > 0 else features.bb_bandwidth_pct / 2
-        if expected_move < round_trip_cost * 2 and expected_move > 0:
-            return signals  # not enough energy
+        low_energy = False
 
-        # Also skip if BB too tight (original check)
-        if features.bb_bandwidth_pct < 1.5 and features.bb_bandwidth_pct > 0:
-            return signals
+        if (expected_move < round_trip_cost * 2 and expected_move > 0) or \
+           (features.bb_bandwidth_pct < 1.5 and features.bb_bandwidth_pct > 0):
+            # Instead of skipping entirely, operate with reduced size and wider spacing
+            low_energy = True
+            size_mult *= 0.3   # 30% size
+            # spacing will be widened by 1.2x below
 
         # ===== COOLDOWN AFTER PROFIT =====
         # Avoid overtrading in euphoria
@@ -70,6 +71,8 @@ class GridStrategy(IStrategy):
 
         # ===== CALCULATE DYNAMIC SPACING =====
         spacing_pct = self._calculate_spacing(features)
+        if low_energy:
+            spacing_pct = round(spacing_pct * 1.2, 2)  # wider in low energy
 
         # ===== ADJUST FOR REGIME AND CONFIDENCE =====
         levels = self.grid_levels

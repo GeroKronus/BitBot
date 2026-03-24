@@ -120,9 +120,18 @@ async def run():
             governor_decision = governor.decide(features, regime_state, position)
 
             # ========== 6. STRATEGY SIGNALS ==========
-            signals = orchestrator.select_and_run(
-                features, regime_state, position, governor_decision
-            )
+            # Only generate new grid signals if order book is empty or needs refresh
+            needs_signals = True
+            if mode != "real" and hasattr(execution, '_open_orders'):
+                if len(execution._open_orders) >= 4:  # already have grid orders pending
+                    needs_signals = False
+
+            if needs_signals:
+                signals = orchestrator.select_and_run(
+                    features, regime_state, position, governor_decision
+                )
+            else:
+                signals = []
 
             # ========== 7. RISK FILTER ==========
             # Risk > Governor > Strategy (authority hierarchy)
@@ -131,16 +140,23 @@ async def run():
             )
 
             # ========== 8. EXECUTION ==========
+            # Place new orders (limit orders go to pending book)
             if approved:
                 results = execution.execute(approved)
-
                 for result in results:
                     if result.filled:
                         print(f"  Executed: {result.fill_amount:.5f} BTC @ ${result.fill_price:,.1f} "
                               f"(slip: {result.slippage_pct}%, lat: {result.latency_ms}ms)")
 
+            # Check pending limit orders against current price (paper mode)
+            if mode != "real" and hasattr(execution, 'check_fills'):
+                fill_results = execution.check_fills(snapshot.price)
+                for result in fill_results:
+                    if result.filled:
+                        print(f"  Fill: {result.fill_amount:.5f} BTC @ ${result.fill_price:,.1f} "
+                              f"(slip: {result.slippage_pct}%, lat: {result.latency_ms}ms)")
+
             # ========== 9. UPDATE STATE ==========
-            # Sync position from exchange (real mode) or update from results
             if mode == "real":
                 raw_pos = market_data.get_position()
                 position = Position(
@@ -153,15 +169,38 @@ async def run():
                 )
                 bal = market_data.get_balance()
                 risk_engine.update_capital(bal.get("total", capital))
+            else:
+                # Paper mode: update from PaperPosition
+                position = execution.position.to_position(snapshot.price)
+                risk_engine.update_capital(execution.position.capital)
 
-            # ========== 10. PERIODIC LOG ==========
+            # ========== 10. MISSED OPPORTUNITY TRACKER ==========
+            if regime_state.current in ("TREND_STRONG",) and position.side == "flat":
+                if not hasattr(run, '_trend_start_price'):
+                    run._trend_start_price = snapshot.price
+                    run._trend_start_tick = tick
+                move = abs(snapshot.price - run._trend_start_price)
+                move_pct = move / run._trend_start_price * 100 if run._trend_start_price > 0 else 0
+                ticks_in_trend = tick - run._trend_start_tick
+                if ticks_in_trend > 0 and ticks_in_trend % 120 == 0:  # log every 10 min
+                    print(f"  MISSED: TREND_STRONG for {ticks_in_trend*5//60}min, "
+                          f"move: ${move:,.0f} ({move_pct:.1f}%), position: FLAT")
+            else:
+                if hasattr(run, '_trend_start_price'):
+                    del run._trend_start_price
+                    del run._trend_start_tick
+
+            # ========== 11. PERIODIC LOG ==========
             if tick % 60 == 0:  # every ~5 min
                 elapsed = time.time() - start
+                cap_str = ""
+                if mode != "real":
+                    cap_str = f" | Cap: ${execution.position.capital:.2f} ({execution.position.trade_count} trades)"
                 print(f"  [{tick}] ${snapshot.price:,.0f} | {regime_state.current} "
                       f"({regime_state.confidence:.0%}) | "
                       f"{orchestrator.active_strategy_name} | "
                       f"Pos: {position.side} {position.size:.5f} | "
-                      f"{elapsed*1000:.0f}ms")
+                      f"{elapsed*1000:.0f}ms{cap_str}")
 
             # Stale order cleanup (every 5 min)
             if tick % 60 == 0 and mode == "real":

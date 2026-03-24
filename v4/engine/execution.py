@@ -261,31 +261,272 @@ class HyperliquidExecutionAgent(IExecutionAgent):
         }
 
 
-class PaperExecutionAgent(IExecutionAgent):
-    """Paper mode execution — simulates fills with configurable slippage."""
+class PaperPosition:
+    """Tracks position state in paper mode. Single source of truth."""
 
-    def __init__(self, slippage_pct: float = 0.05):
+    def __init__(self, capital: float = 130.0):
+        self.side = "flat"
+        self.size = 0.0
+        self.entry_price = 0.0
+        self.capital = capital
+        self.realized_pnl = 0.0
+        self.trade_count = 0
+
+    def update_on_fill(self, side: str, amount: float, price: float, fee: float):
+        """Update position after a fill."""
+        if side == "close":
+            # Close position
+            if self.side == "long":
+                pnl = (price - self.entry_price) * self.size - fee
+            elif self.side == "short":
+                pnl = (self.entry_price - price) * self.size - fee
+            else:
+                pnl = -fee
+            self.capital += pnl
+            self.realized_pnl += pnl
+            self.side = "flat"
+            self.size = 0.0
+            self.entry_price = 0.0
+            self.trade_count += 1
+            return pnl
+
+        elif side == "buy":
+            if self.side == "short":
+                # Close short first
+                pnl = (self.entry_price - price) * min(amount, self.size) - fee
+                self.capital += pnl
+                self.realized_pnl += pnl
+                self.size -= amount
+                if self.size <= 0.000001:
+                    self.side = "flat"
+                    self.size = 0.0
+                    self.entry_price = 0.0
+                self.trade_count += 1
+                return pnl
+            else:
+                # Add to long
+                if self.side == "long" and self.size > 0:
+                    total_cost = self.entry_price * self.size + price * amount
+                    self.size += amount
+                    self.entry_price = total_cost / self.size
+                else:
+                    self.side = "long"
+                    self.size = amount
+                    self.entry_price = price
+                self.capital -= fee
+                self.trade_count += 1
+                return -fee
+
+        elif side == "sell":
+            if self.side == "long":
+                # Close long first
+                pnl = (price - self.entry_price) * min(amount, self.size) - fee
+                self.capital += pnl
+                self.realized_pnl += pnl
+                self.size -= amount
+                if self.size <= 0.000001:
+                    self.side = "flat"
+                    self.size = 0.0
+                    self.entry_price = 0.0
+                self.trade_count += 1
+                return pnl
+            else:
+                # Add to short
+                if self.side == "short" and self.size > 0:
+                    total_cost = self.entry_price * self.size + price * amount
+                    self.size += amount
+                    self.entry_price = total_cost / self.size
+                else:
+                    self.side = "short"
+                    self.size = amount
+                    self.entry_price = price
+                self.capital -= fee
+                self.trade_count += 1
+                return -fee
+
+        return 0.0
+
+    def _cleanup_dust(self, current_price: float):
+        """Close position if below minimum trade size (dust cleanup)."""
+        min_value = 5.0  # $5 minimum — below Hyperliquid's $10 can't close
+        if self.side != "flat" and self.size > 0:
+            notional = self.size * current_price if current_price > 0 else 0
+            if notional < min_value:
+                # Position is dust — write it off
+                if self.side == "long":
+                    pnl = (current_price - self.entry_price) * self.size
+                else:
+                    pnl = (self.entry_price - current_price) * self.size
+                self.capital += pnl
+                self.realized_pnl += pnl
+                self.side = "flat"
+                self.size = 0.0
+                self.entry_price = 0.0
+
+    def get_unrealized(self, current_price: float) -> float:
+        if self.side == "long":
+            return (current_price - self.entry_price) * self.size
+        elif self.side == "short":
+            return (self.entry_price - current_price) * self.size
+        return 0.0
+
+    def to_position(self, current_price: float = 0):
+        """Convert to Position dataclass for pipeline compatibility."""
+        from ..core.interfaces import Position
+        return Position(
+            side=self.side,
+            size=self.size,
+            entry_price=self.entry_price,
+            unrealized_pnl=self.get_unrealized(current_price),
+            notional=self.size * current_price if current_price > 0 else 0,
+            leverage=4,
+        )
+
+
+class PaperExecutionAgent(IExecutionAgent):
+    """Paper mode execution with realistic fills, slippage, partial fills, and delay."""
+
+    def __init__(self, capital: float = 130.0, slippage_pct: float = 0.05,
+                 fee_pct: float = 0.05, partial_fill_rate: float = 0.95):
         self.slippage_pct = slippage_pct
-        self._orders = []
+        self.fee_pct = fee_pct
+        self.partial_fill_rate = partial_fill_rate
+        self.position = PaperPosition(capital)
+        self._open_orders = []
+        # Metrics
+        self._total_fills = 0
+        self._partial_fills = 0
+        self._total_slippage = 0.0
 
     def execute(self, signals: list) -> list:
+        """Place signals as pending orders. Does NOT fill immediately.
+
+        Grid limit orders sit in the order book until price crosses them.
+        Market orders and close signals fill immediately.
+        """
+        import random
+
         results = []
         for s in signals:
-            fill_price = s.price * (1 + self.slippage_pct / 100) if s.side == "buy" else \
-                         s.price * (1 - self.slippage_pct / 100)
-            results.append(ExecutionResult(
-                filled=True,
-                fill_price=round(fill_price, 2),
-                fill_amount=s.amount,
-                slippage_pct=self.slippage_pct,
-                latency_ms=50,
-            ))
+            if s.order_type == "market" or s.side == "close":
+                # Market/close: fill immediately
+                result = self._fill_now(s)
+                results.append(result)
+            else:
+                # Limit order: add to pending order book
+                self._open_orders.append({
+                    "side": s.side,
+                    "price": s.price,
+                    "amount": s.amount,
+                    "source": s.source,
+                })
         return results
 
+    def check_fills(self, current_price: float) -> list:
+        """Check pending orders against current price. Called every tick.
+
+        Buy fills when price <= order price.
+        Sell fills when price >= order price.
+        """
+        import random
+
+        filled_results = []
+        remaining = []
+
+        for order in self._open_orders:
+            should_fill = False
+            if order["side"] == "buy" and current_price <= order["price"]:
+                should_fill = True
+            elif order["side"] == "sell" and current_price >= order["price"]:
+                should_fill = True
+
+            if should_fill:
+                result = self._simulate_fill(order, current_price)
+                filled_results.append(result)
+            else:
+                remaining.append(order)
+
+        self._open_orders = remaining
+        return filled_results
+
+    def _fill_now(self, signal) -> ExecutionResult:
+        """Immediately fill a market/close signal."""
+        import random
+
+        actual_slippage = self.slippage_pct * random.uniform(0.5, 1.5)
+        if signal.side == "buy" or (signal.side == "close" and self.position.side == "short"):
+            fill_price = round(signal.price * (1 + actual_slippage / 100), 2)
+        else:
+            fill_price = round(signal.price * (1 - actual_slippage / 100), 2)
+
+        fill_pct = 1.0 if random.random() < self.partial_fill_rate else random.uniform(0.5, 0.9)
+        fill_amount = round(signal.amount * fill_pct, 5)
+        fee = fill_amount * fill_price * self.fee_pct / 100
+
+        self.position.update_on_fill(signal.side, fill_amount, fill_price, fee)
+        self.position._cleanup_dust(fill_price)
+
+        self._total_fills += 1
+        if fill_pct < 1.0:
+            self._partial_fills += 1
+        self._total_slippage += actual_slippage
+
+        return ExecutionResult(
+            filled=True, fill_price=fill_price, fill_amount=fill_amount,
+            slippage_pct=round(actual_slippage, 4), latency_ms=random.randint(50, 300),
+            partial=fill_pct < 1.0,
+        )
+
+    def _simulate_fill(self, order: dict, current_price: float) -> ExecutionResult:
+        """Fill a pending limit order that was triggered by price."""
+        import random
+
+        actual_slippage = self.slippage_pct * random.uniform(0.3, 1.0)
+        fill_price = round(order["price"] * (1 + actual_slippage / 100 * (1 if order["side"] == "buy" else -1)), 2)
+
+        fill_pct = 1.0 if random.random() < self.partial_fill_rate else random.uniform(0.5, 0.9)
+        fill_amount = round(order["amount"] * fill_pct, 5)
+        fee = fill_amount * fill_price * self.fee_pct / 100
+
+        self.position.update_on_fill(order["side"], fill_amount, fill_price, fee)
+        self.position._cleanup_dust(fill_price)
+
+        self._total_fills += 1
+        if fill_pct < 1.0:
+            self._partial_fills += 1
+        self._total_slippage += actual_slippage
+
+        return ExecutionResult(
+            filled=True, fill_price=fill_price, fill_amount=fill_amount,
+            slippage_pct=round(actual_slippage, 4), latency_ms=random.randint(50, 200),
+            partial=fill_pct < 1.0,
+        )
+
+    def get_metrics(self) -> dict:
+        avg_slip = self._total_slippage / self._total_fills if self._total_fills > 0 else 0
+        partial_ratio = self._partial_fills / self._total_fills * 100 if self._total_fills > 0 else 0
+        return {
+            "total_fills": self._total_fills,
+            "partial_fills": self._partial_fills,
+            "partial_ratio_pct": round(partial_ratio, 1),
+            "avg_slippage_pct": round(avg_slip, 4),
+            "capital": round(self.position.capital, 2),
+            "realized_pnl": round(self.position.realized_pnl, 4),
+            "position": self.position.side,
+            "position_size": self.position.size,
+            "trade_count": self.position.trade_count,
+        }
+
     def cancel_all(self) -> int:
-        count = len(self._orders)
-        self._orders = []
+        count = len(self._open_orders)
+        self._open_orders = []
         return count
 
     def close_position(self, position: Position, price: float) -> ExecutionResult:
-        return ExecutionResult(filled=True, fill_price=price, fill_amount=position.size)
+        if self.position.side == "flat":
+            return ExecutionResult(error="No position")
+        from ..core.interfaces import Signal
+        signal = Signal(side="close", price=price, amount=self.position.size,
+                        reduce_only=True, source="PAPER_CLOSE")
+        results = self.execute([signal])
+        return results[0] if results else ExecutionResult(error="Failed")
