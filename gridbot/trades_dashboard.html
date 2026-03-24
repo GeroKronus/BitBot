@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BitBot Trades</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0d1117; color: #e6edf3; min-height: 100vh; }
+        .header { background: linear-gradient(135deg, #161b22, #1a1f2b); border-bottom: 1px solid #30363d; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+        .header h1 { font-size: 22px; font-weight: 600; color: #3fb950; }
+        .header h1 span { color: #e6edf3; font-weight: 400; }
+        .back-btn { padding: 6px 16px; border-radius: 6px; border: 1px solid #30363d; background: #21262d; color: #e6edf3; cursor: pointer; font-size: 13px; text-decoration: none; }
+        .back-btn:hover { background: #30363d; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 20px; }
+        .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; }
+        .card-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #8b949e; margin-bottom: 8px; }
+        .big-number { font-size: 28px; font-weight: 700; }
+        .green { color: #3fb950; }
+        .red { color: #f85149; }
+        .orange { color: #f0883e; }
+        .blue { color: #58a6ff; }
+        .sub-text { font-size: 13px; color: #8b949e; margin-top: 4px; }
+        .section-title { font-size: 16px; font-weight: 600; color: #3fb950; margin: 24px 0 12px; border-bottom: 1px solid #30363d; padding-bottom: 8px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th { text-align: left; padding: 8px 12px; color: #8b949e; border-bottom: 2px solid #30363d; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+        td { padding: 6px 12px; border-bottom: 1px solid #21262d; }
+        tr:hover { background: #161b2280; }
+        .buy-row { border-left: 3px solid #3fb950; }
+        .sell-row { border-left: 3px solid #f85149; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+        .badge-buy { background: #3fb95020; color: #3fb950; }
+        .badge-sell { background: #f8514920; color: #f85149; }
+        .daily-row { padding: 8px 12px; background: #21262d; border-radius: 4px; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center; }
+        .footer { text-align: center; padding: 16px; color: #484f58; font-size: 12px; }
+        .filter-bar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+        .filter-btn { padding: 4px 12px; border-radius: 4px; border: 1px solid #30363d; background: #21262d; color: #8b949e; cursor: pointer; font-size: 12px; }
+        .filter-btn.active { background: #3fb95020; color: #3fb950; border-color: #3fb950; }
+        .filter-btn:hover { border-color: #8b949e; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>BitBot <span>Trade History</span></h1>
+        <a href="/" class="back-btn">Dashboard Principal</a>
+    </div>
+
+    <div class="container">
+        <!-- Summary cards -->
+        <div class="grid">
+            <div class="card">
+                <div class="card-title">Total Trades</div>
+                <div class="big-number blue" id="total-trades">--</div>
+                <div class="sub-text"><span id="total-buys">--</span> buys | <span id="total-sells">--</span> sells</div>
+            </div>
+            <div class="card">
+                <div class="card-title">P&L Global (real)</div>
+                <div class="big-number" id="total-pnl">--</div>
+                <div class="sub-text">Fees: $<span id="total-fees">--</span></div>
+            </div>
+            <div class="card">
+                <div class="card-title">P&L Hoje</div>
+                <div class="big-number" id="today-pnl">--</div>
+                <div class="sub-text"><span id="today-trades">--</span> trades hoje</div>
+            </div>
+            <div class="card">
+                <div class="card-title">Lucro Medio/Trade</div>
+                <div class="big-number" id="avg-pnl">--</div>
+                <div class="sub-text">por trade lucrativo</div>
+            </div>
+            <div class="card">
+                <div class="card-title">Win Rate</div>
+                <div class="big-number" id="win-rate">--</div>
+                <div class="sub-text"><span id="wins">--</span> wins / <span id="losses">--</span> losses</div>
+            </div>
+        </div>
+
+        <!-- Daily P&L -->
+        <div class="section-title">P&L Diario</div>
+        <div class="card" style="margin-bottom: 20px;">
+            <div id="daily-pnl">Carregando...</div>
+        </div>
+
+        <!-- Trade list -->
+        <div class="section-title">Historico de Trades</div>
+        <div class="filter-bar">
+            <button class="filter-btn active" onclick="filterTrades('all')">Todos</button>
+            <button class="filter-btn" onclick="filterTrades('buy')">Compras</button>
+            <button class="filter-btn" onclick="filterTrades('sell')">Vendas</button>
+            <button class="filter-btn" onclick="filterTrades('profit')">Lucrativos</button>
+            <button class="filter-btn" onclick="filterTrades('loss')">Prejuizo</button>
+        </div>
+        <div class="card" style="max-height: 600px; overflow-y: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Data/Hora</th>
+                        <th>Tipo</th>
+                        <th>Size (BTC)</th>
+                        <th>Preco</th>
+                        <th>Valor (USDC)</th>
+                        <th>Fee</th>
+                        <th>P&L</th>
+                    </tr>
+                </thead>
+                <tbody id="trades-table">
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="footer">BitBot Trade History — Auto-refresh 15s</div>
+
+    <script>
+        const API = window.location.origin;
+        let allTrades = [];
+        let currentFilter = 'all';
+
+        function fmt(n, d=2) { return n ? n.toLocaleString('en-US', {minimumFractionDigits:d, maximumFractionDigits:d}) : '0.00'; }
+
+        function toBRT(ts) {
+            if (!ts) return {date: '--', time: '--'};
+            var d = new Date(ts);
+            var opts = {timeZone: 'America/Sao_Paulo'};
+            return {
+                date: d.toLocaleDateString('pt-BR', opts),
+                time: d.toLocaleTimeString('pt-BR', opts),
+                dateISO: d.toLocaleDateString('sv-SE', opts)
+            };
+        }
+
+        var exchangeBalance = 0;
+        var exchangeUnrealized = 0;
+
+        async function fetchTrades() {
+            try {
+                const res = await fetch(API + '/trades');
+                const data = await res.json();
+                allTrades = (data.trades || []).filter(t => t.side === 'buy' || t.side === 'sell');
+                // Also fetch balance for real P&L
+                const res2 = await fetch(API + '/api');
+                const status = await res2.json();
+                exchangeBalance = status.balance.USDT || status.balance.USDC || 0;
+                exchangeUnrealized = status.unrealized_pnl || 0;
+                updateSummary();
+                renderTrades();
+            } catch(e) {}
+        }
+
+        function updateSummary() {
+            var buys = allTrades.filter(t => t.side === 'buy');
+            var sells = allTrades.filter(t => t.side === 'sell');
+            var totalPnl = sells.reduce((s, t) => s + (t.pnl || 0), 0);
+            var totalFees = allTrades.reduce((s, t) => s + (t.fee || 0), 0);
+            // Net P&L = realized P&L from sells minus all fees
+            var netPnl = totalPnl - totalFees;
+
+            document.getElementById('total-trades').textContent = allTrades.length;
+            document.getElementById('total-buys').textContent = buys.length;
+            document.getElementById('total-sells').textContent = sells.length;
+
+            // P&L Global real = balance + unrealized - investimento
+            var globalPnl = exchangeBalance + exchangeUnrealized - 126.22;
+            var pnlEl = document.getElementById('total-pnl');
+            pnlEl.textContent = (globalPnl >= 0 ? '+$' : '-$') + fmt(Math.abs(globalPnl));
+            pnlEl.className = 'big-number ' + (globalPnl >= 0 ? 'green' : 'red');
+            document.getElementById('total-fees').textContent = fmt(totalFees);
+
+            // Today
+            var todayBRT = new Date().toLocaleDateString('sv-SE', {timeZone: 'America/Sao_Paulo'});
+            var todayTrades = allTrades.filter(t => toBRT(t.timestamp).dateISO === todayBRT);
+            var todaySells = todayTrades.filter(t => t.side === 'sell');
+            var todayPnl = todaySells.reduce((s, t) => s + (t.pnl || 0), 0);
+            var todayFees = todayTrades.reduce((s, t) => s + (t.fee || 0), 0);
+            var todayNet = todayPnl - todayFees;
+            var tpEl = document.getElementById('today-pnl');
+            tpEl.textContent = (todayNet >= 0 ? '+$' : '-$') + fmt(Math.abs(todayNet));
+            tpEl.className = 'big-number ' + (todayNet >= 0 ? 'green' : 'red');
+            document.getElementById('today-trades').textContent = todayTrades.length;
+
+            // Win rate (based on sell trades with positive pnl field)
+            var profitable = sells.filter(t => (t.pnl || 0) > 0);
+            var losing = sells.filter(t => (t.pnl || 0) < 0);
+            var winRate = sells.length > 0 ? (profitable.length / sells.length * 100) : 0;
+            var wrEl = document.getElementById('win-rate');
+            wrEl.textContent = fmt(winRate, 1) + '%';
+            wrEl.className = 'big-number ' + (winRate >= 50 ? 'green' : 'red');
+            document.getElementById('wins').textContent = profitable.length;
+            document.getElementById('losses').textContent = losing.length;
+
+            // Avg P&L per profitable trade
+            var avgPnl = profitable.length > 0 ? profitable.reduce((s, t) => s + t.pnl, 0) / profitable.length : 0;
+            var apEl = document.getElementById('avg-pnl');
+            apEl.textContent = '+$' + fmt(avgPnl, 4);
+            apEl.className = 'big-number green';
+
+            // Daily P&L (using pnl field from sells, minus fees)
+            var dailyTrades = {};
+            allTrades.forEach(function(t) {
+                var d = toBRT(t.timestamp).dateISO;
+                if (!dailyTrades[d]) dailyTrades[d] = [];
+                dailyTrades[d].push(t);
+            });
+            var dHtml = '';
+            Object.keys(dailyTrades).sort().reverse().forEach(function(d) {
+                var dayTrades = dailyTrades[d];
+                var daySells = dayTrades.filter(t => t.side === 'sell');
+                var dayPnl = daySells.reduce((s, t) => s + (t.pnl || 0), 0);
+                var dayFees = dayTrades.reduce((s, t) => s + (t.fee || 0), 0);
+                var dayNet = dayPnl - dayFees;
+                var dayBuys = dayTrades.filter(t => t.side === 'buy').length;
+                var color = dayNet >= 0 ? '#3fb950' : '#f85149';
+                dHtml += '<div class="daily-row">';
+                dHtml += '<span>' + d + ' — ' + dayTrades.length + ' trades (' + dayBuys + 'B/' + daySells.length + 'S) | Fees: $' + fmt(dayFees) + '</span>';
+                dHtml += '<span style="color:' + color + ';font-weight:600;">' + (dayNet >= 0 ? '+$' : '-$') + fmt(Math.abs(dayNet)) + '</span>';
+                dHtml += '</div>';
+            });
+            document.getElementById('daily-pnl').innerHTML = dHtml || 'Sem dados';
+        }
+
+        function renderTrades() {
+            var filtered = allTrades;
+            if (currentFilter === 'buy') filtered = allTrades.filter(t => t.side === 'buy');
+            else if (currentFilter === 'sell') filtered = allTrades.filter(t => t.side === 'sell');
+            else if (currentFilter === 'profit') filtered = allTrades.filter(t => (t.pnl || 0) > 0);
+            else if (currentFilter === 'loss') filtered = allTrades.filter(t => (t.pnl || 0) < 0);
+
+            var html = '';
+            filtered.slice().reverse().forEach(function(t) {
+                var brt = toBRT(t.timestamp);
+                var dt = brt.date;
+                var tm = brt.time;
+                var cls = t.side === 'buy' ? 'buy-row' : 'sell-row';
+                var badge = t.side === 'buy' ? '<span class="badge badge-buy">BUY</span>' : '<span class="badge badge-sell">SELL</span>';
+                var pnl = t.pnl || 0;
+                var pnlStr = pnl !== 0 ? ((pnl >= 0 ? '+$' : '-$') + fmt(Math.abs(pnl), 4)) : '--';
+                var pnlColor = pnl > 0 ? '#3fb950' : (pnl < 0 ? '#f85149' : '#8b949e');
+                html += '<tr class="' + cls + '">';
+                html += '<td>' + dt + ' ' + tm + '</td>';
+                html += '<td>' + badge + '</td>';
+                html += '<td>' + fmt(t.amount, 5) + '</td>';
+                html += '<td>$' + fmt(t.price) + '</td>';
+                html += '<td>$' + fmt(t.cost || t.amount * t.price) + '</td>';
+                html += '<td>$' + fmt(t.fee || 0, 4) + '</td>';
+                html += '<td style="color:' + pnlColor + ';font-weight:600;">' + pnlStr + '</td>';
+                html += '</tr>';
+            });
+            document.getElementById('trades-table').innerHTML = html || '<tr><td colspan="7" style="text-align:center;color:#484f58;">Sem trades</td></tr>';
+        }
+
+        function filterTrades(filter) {
+            currentFilter = filter;
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            event.target.classList.add('active');
+            renderTrades();
+        }
+
+        fetchTrades();
+        setInterval(fetchTrades, 15000);
+    </script>
+</body>
+</html>

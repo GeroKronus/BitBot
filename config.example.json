@@ -1,0 +1,15 @@
+{
+    "mode": "paper",
+    "exchange": "hyperliquid",
+    "symbol": "BTC/USDC:USDC",
+    "capital_usdt": 1000.0,
+    "grid_levels": 5,
+    "grid_spacing_pct": 0.5,
+    "order_size_usdt": 20.0,
+    "leverage": 4,
+    "stop_loss_pct": 5.0,
+    "trailing_profit_pct": 3.0,
+    "trailing_callback_pct": 1.0,
+    "hyperliquid_private_key": "YOUR_PRIVATE_KEY",
+    "hyperliquid_wallet_address": "YOUR_WALLET_ADDRESS"
+}

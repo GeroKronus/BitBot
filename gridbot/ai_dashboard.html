@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BitBot AI Analyst</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0d1117; color: #e6edf3; min-height: 100vh; }
+        .header { background: linear-gradient(135deg, #161b22, #1a1f2b); border-bottom: 1px solid #30363d; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+        .header h1 { font-size: 22px; font-weight: 600; color: #a371f7; }
+        .header h1 span { color: #e6edf3; font-weight: 400; }
+        .back-btn { padding: 6px 16px; border-radius: 6px; border: 1px solid #30363d; background: #21262d; color: #e6edf3; cursor: pointer; font-size: 13px; text-decoration: none; }
+        .back-btn:hover { background: #30363d; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-bottom: 20px; }
+        .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; }
+        .card-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #8b949e; margin-bottom: 12px; }
+        .stat-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #21262d; font-size: 14px; }
+        .stat-row:last-child { border-bottom: none; }
+        .stat-label { color: #8b949e; }
+        .stat-value { font-weight: 600; }
+        .green { color: #3fb950; }
+        .red { color: #f85149; }
+        .orange { color: #f0883e; }
+        .yellow { color: #d29922; }
+        .purple { color: #a371f7; }
+        .blue { color: #58a6ff; }
+        .section-title { font-size: 16px; font-weight: 600; color: #a371f7; margin: 24px 0 12px; border-bottom: 1px solid #30363d; padding-bottom: 8px; }
+        .indicator-bar { height: 8px; border-radius: 4px; background: #21262d; position: relative; margin: 4px 0 8px; }
+        .indicator-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
+        .event-item { padding: 8px 12px; background: #21262d; border-radius: 4px; margin-bottom: 4px; font-size: 13px; display: flex; justify-content: space-between; }
+        .event-item.urgent { border-left: 3px solid #f85149; }
+        .event-item.soon { border-left: 3px solid #d29922; }
+        .event-item.safe { border-left: 3px solid #3fb950; }
+        .sr-level { display: flex; justify-content: space-between; padding: 4px 8px; margin: 2px 0; border-radius: 3px; font-size: 13px; }
+        .sr-support { background: #3fb95010; border-left: 2px solid #3fb950; }
+        .sr-resistance { background: #f8514910; border-left: 2px solid #f85149; }
+        .source-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; margin: 2px; }
+        .source-active { background: #23863620; color: #3fb950; border: 1px solid #23863650; }
+        .source-planned { background: #484f5820; color: #484f58; border: 1px solid #484f5850; }
+        .decision-box { background: #21262d; border-radius: 8px; padding: 16px; margin-top: 12px; }
+        .decision-title { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+        .footer { text-align: center; padding: 16px; color: #484f58; font-size: 12px; }
+        .update-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #a371f7; margin-right: 6px; animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1><span class="update-dot"></span>BitBot <span>AI Analyst</span></h1>
+        <div>
+            <span id="last-update" style="color: #8b949e; font-size: 12px; margin-right: 12px;">--</span>
+            <a href="/" class="back-btn">Dashboard Principal</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Data Sources -->
+        <div class="section-title">Fontes de Dados</div>
+        <div style="margin-bottom: 16px;">
+            <span class="source-badge source-active">RSI (14)</span>
+            <span class="source-badge source-active">SMA 20/50</span>
+            <span class="source-badge source-active">Bollinger Bands</span>
+            <span class="source-badge source-active">ATR</span>
+            <span class="source-badge source-active">Fear & Greed</span>
+            <span class="source-badge source-active">Funding Rate</span>
+            <span class="source-badge source-active">Volume 7d</span>
+            <span class="source-badge source-active">Suportes/Resistencias</span>
+            <span class="source-badge source-active">Calendario Macro</span>
+            <span class="source-badge source-planned">DXY (planejado)</span>
+            <span class="source-badge source-planned">Petroleo (planejado)</span>
+            <span class="source-badge source-planned">Ouro (planejado)</span>
+            <span class="source-badge source-planned">S&P 500 (planejado)</span>
+            <span class="source-badge source-active">Noticias Crypto</span>
+            <span class="source-badge source-planned">On-chain (planejado)</span>
+        </div>
+
+        <!-- Technical Indicators -->
+        <div class="section-title">Indicadores Tecnicos</div>
+        <div class="grid">
+            <div class="card">
+                <div class="card-title">RSI (14)</div>
+                <div id="rsi-value" style="font-size: 28px; font-weight: 700;">--</div>
+                <div id="rsi-label" style="font-size: 13px; color: #8b949e;">--</div>
+                <div class="indicator-bar">
+                    <div id="rsi-bar" class="indicator-fill" style="width: 50%; background: #d29922;"></div>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 11px; color: #484f58;">
+                    <span>Sobrevenda (30)</span><span>Neutro</span><span>Sobrecompra (70)</span>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-title">Medias Moveis</div>
+                <div class="stat-row"><span class="stat-label">SMA 20</span><span class="stat-value" id="sma20">--</span></div>
+                <div class="stat-row"><span class="stat-label">SMA 50</span><span class="stat-value" id="sma50">--</span></div>
+                <div class="stat-row"><span class="stat-label">Tendencia</span><span class="stat-value" id="sma-trend">--</span></div>
+                <div class="stat-row"><span class="stat-label">Preco vs SMA20</span><span class="stat-value" id="price-vs-sma">--</span></div>
+            </div>
+            <div class="card">
+                <div class="card-title">Bollinger Bands</div>
+                <div class="stat-row"><span class="stat-label">Upper Band</span><span class="stat-value red" id="bb-upper">--</span></div>
+                <div class="stat-row"><span class="stat-label">Middle</span><span class="stat-value" id="bb-middle">--</span></div>
+                <div class="stat-row"><span class="stat-label">Lower Band</span><span class="stat-value green" id="bb-lower">--</span></div>
+                <div class="stat-row"><span class="stat-label">Posicao %</span><span class="stat-value" id="bb-position">--</span></div>
+            </div>
+            <div class="card">
+                <div class="card-title">Volatilidade (ATR)</div>
+                <div id="atr-value" style="font-size: 28px; font-weight: 700;">--</div>
+                <div id="atr-pct" style="font-size: 13px; color: #8b949e;">--</div>
+                <div class="stat-row" style="margin-top: 8px;"><span class="stat-label">Nivel</span><span class="stat-value" id="atr-level">--</span></div>
+            </div>
+        </div>
+
+        <!-- Market Sentiment -->
+        <div class="section-title">Sentimento do Mercado</div>
+        <div class="grid">
+            <div class="card">
+                <div class="card-title">Fear & Greed Index</div>
+                <div id="fg-value" style="font-size: 36px; font-weight: 700;">--</div>
+                <div id="fg-label" style="font-size: 14px; margin-bottom: 8px;">--</div>
+                <div class="indicator-bar">
+                    <div id="fg-bar" class="indicator-fill" style="width: 50%; background: #d29922;"></div>
+                </div>
+                <div id="fg-history" style="font-size: 12px; color: #484f58; margin-top: 4px;">--</div>
+            </div>
+            <div class="card">
+                <div class="card-title">Funding Rate (Hyperliquid)</div>
+                <div id="fr-value" style="font-size: 28px; font-weight: 700;">--</div>
+                <div id="fr-meaning" style="font-size: 13px; color: #8b949e;">--</div>
+            </div>
+            <div class="card">
+                <div class="card-title">Mercado BTC</div>
+                <div class="stat-row"><span class="stat-label">24h</span><span class="stat-value" id="btc-24h">--</span></div>
+                <div class="stat-row"><span class="stat-label">7d</span><span class="stat-value" id="btc-7d">--</span></div>
+                <div class="stat-row"><span class="stat-label">30d</span><span class="stat-value" id="btc-30d">--</span></div>
+                <div class="stat-row"><span class="stat-label">Volume 24h</span><span class="stat-value" id="btc-vol">--</span></div>
+            </div>
+        </div>
+
+        <!-- Support / Resistance -->
+        <div class="section-title">Suportes e Resistencias</div>
+        <div class="card" style="margin-bottom: 20px;">
+            <div id="sr-levels">Carregando...</div>
+        </div>
+
+        <!-- News -->
+        <div class="section-title">Noticias em Tempo Real</div>
+        <div class="card" style="margin-bottom: 20px;">
+            <div id="news-list">Carregando...</div>
+        </div>
+
+        <!-- Macro Events -->
+        <div class="section-title">Calendario Macro</div>
+        <div class="card" style="margin-bottom: 20px;">
+            <div id="macro-events">Carregando...</div>
+        </div>
+
+        <!-- AI Decision -->
+        <div class="section-title">Decisao da IA</div>
+        <div class="card" style="margin-bottom: 20px; border-left: 3px solid #a371f7;">
+            <div class="decision-box">
+                <div class="decision-title">Ultima Analise</div>
+                <div id="ai-decision-text" style="font-size: 13px; color: #c9d1d9; white-space: pre-wrap;">--</div>
+            </div>
+            <div class="grid" style="margin-top: 12px;">
+                <div>
+                    <div class="stat-row"><span class="stat-label">Signal</span><span class="stat-value" id="ai-signal">--</span></div>
+                    <div class="stat-row"><span class="stat-label">Outlook</span><span class="stat-value" id="ai-outlook">--</span></div>
+                    <div class="stat-row"><span class="stat-label">Confianca</span><span class="stat-value" id="ai-conf">--</span></div>
+                    <div class="stat-row"><span class="stat-label">Risco</span><span class="stat-value" id="ai-risk">--</span></div>
+                </div>
+                <div>
+                    <div class="stat-row"><span class="stat-label">Stop Loss</span><span class="stat-value red" id="ai-sl">--</span></div>
+                    <div class="stat-row"><span class="stat-label">Target 1</span><span class="stat-value green" id="ai-t1">--</span></div>
+                    <div class="stat-row"><span class="stat-label">Target 2</span><span class="stat-value green" id="ai-t2">--</span></div>
+                    <div class="stat-row"><span class="stat-label">Motivo Targets</span><span class="stat-value" id="ai-tr" style="font-size: 12px; max-width: 200px; text-align: right;">--</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">BitBot AI Analyst — Auto-refresh 10s</div>
+
+    <script>
+        const API = window.location.origin;
+        function fmt(n, d=2) { return n ? n.toLocaleString('en-US', {minimumFractionDigits:d, maximumFractionDigits:d}) : '--'; }
+
+        async function fetchAI() {
+            try {
+                const res = await fetch(API + '/ai-data');
+                const d = await res.json();
+                updateAI(d);
+            } catch(e) {}
+        }
+
+        function updateAI(d) {
+            var cd = d.collected_data || {};
+            var rec = d.recommendation || {};
+            var dt = d.dynamic_targets || {};
+
+            document.getElementById('last-update').textContent = d.last_analysis ? 'Updated: ' + new Date(d.last_analysis).toLocaleTimeString('pt-BR', {timeZone: 'America/Sao_Paulo'}) : '--';
+
+            // Technical
+            var tech = cd.technical || {};
+            var rsi = tech.rsi || 0;
+            var rsiEl = document.getElementById('rsi-value');
+            rsiEl.textContent = fmt(rsi, 1);
+            rsiEl.style.color = rsi < 30 ? '#3fb950' : rsi > 70 ? '#f85149' : '#d29922';
+            document.getElementById('rsi-label').textContent = rsi < 30 ? 'SOBREVENDA' : rsi > 70 ? 'SOBRECOMPRA' : 'NEUTRO';
+            document.getElementById('rsi-bar').style.width = Math.min(100, rsi) + '%';
+            document.getElementById('rsi-bar').style.background = rsi < 30 ? '#3fb950' : rsi > 70 ? '#f85149' : '#d29922';
+
+            var sma20 = tech.sma_20 || 0;
+            var sma50 = tech.sma_50 || 0;
+            document.getElementById('sma20').textContent = '$' + fmt(sma20);
+            document.getElementById('sma50').textContent = '$' + fmt(sma50);
+            var trend = sma20 > sma50 ? 'BULLISH' : sma20 < sma50 ? 'BEARISH' : 'NEUTRO';
+            var trendEl = document.getElementById('sma-trend');
+            trendEl.textContent = trend;
+            trendEl.style.color = trend === 'BULLISH' ? '#3fb950' : trend === 'BEARISH' ? '#f85149' : '#d29922';
+            var priceVsSma = cd.current_price && sma20 ? ((cd.current_price - sma20) / sma20 * 100).toFixed(2) : 0;
+            var pvsEl = document.getElementById('price-vs-sma');
+            pvsEl.textContent = (priceVsSma >= 0 ? '+' : '') + priceVsSma + '%';
+            pvsEl.style.color = priceVsSma >= 0 ? '#3fb950' : '#f85149';
+
+            document.getElementById('bb-upper').textContent = '$' + fmt(tech.bb_upper);
+            document.getElementById('bb-middle').textContent = '$' + fmt(tech.bb_middle);
+            document.getElementById('bb-lower').textContent = '$' + fmt(tech.bb_lower);
+            var bbPos = tech.bb_position_pct;
+            document.getElementById('bb-position').textContent = bbPos ? fmt(bbPos, 0) + '%' : '--';
+
+            var atr = tech.atr || 0;
+            document.getElementById('atr-value').textContent = '$' + fmt(atr);
+            var atrPct = tech.atr_pct || 0;
+            document.getElementById('atr-pct').textContent = fmt(atrPct, 2) + '% do preco';
+            var atrLvl = atrPct > 2 ? 'ALTA' : atrPct > 1 ? 'MEDIA' : 'BAIXA';
+            var atrEl = document.getElementById('atr-level');
+            atrEl.textContent = atrLvl;
+            atrEl.style.color = atrPct > 2 ? '#f85149' : atrPct > 1 ? '#d29922' : '#3fb950';
+
+            // Fear & Greed
+            var fg = cd.fear_greed || {};
+            var fgVal = fg.value || 0;
+            var fgEl = document.getElementById('fg-value');
+            fgEl.textContent = fgVal;
+            fgEl.style.color = fgVal < 25 ? '#f85149' : fgVal < 45 ? '#d29922' : fgVal < 55 ? '#8b949e' : fgVal < 75 ? '#3fb950' : '#3fb950';
+            document.getElementById('fg-label').textContent = fg.label || '--';
+            document.getElementById('fg-bar').style.width = fgVal + '%';
+            document.getElementById('fg-bar').style.background = fgVal < 25 ? '#f85149' : fgVal < 45 ? '#d29922' : fgVal < 55 ? '#8b949e' : '#3fb950';
+            var fgHist = (fg.history_7d || []).map(function(h) { return h.value; }).join(' → ');
+            document.getElementById('fg-history').textContent = fgHist ? '7 dias: ' + fgHist : '--';
+
+            // Funding rate
+            var fr = cd.funding_rate || {};
+            var frVal = fr.rate || 0;
+            var frEl = document.getElementById('fr-value');
+            frEl.textContent = (frVal * 100).toFixed(4) + '%';
+            frEl.style.color = frVal > 0.0003 ? '#f85149' : frVal < -0.0001 ? '#3fb950' : '#8b949e';
+            document.getElementById('fr-meaning').textContent = frVal > 0.0003 ? 'Mercado superaquecido (longs pagando)' : frVal < -0.0001 ? 'Shorts dominando (oportunidade long?)' : 'Neutro';
+
+            // Market
+            var mkt = cd.market || {};
+            function chgColor(v) { return v >= 0 ? '#3fb950' : '#f85149'; }
+            var el24 = document.getElementById('btc-24h');
+            el24.textContent = (mkt.price_change_24h_pct >= 0 ? '+' : '') + fmt(mkt.price_change_24h_pct) + '%';
+            el24.style.color = chgColor(mkt.price_change_24h_pct);
+            var el7 = document.getElementById('btc-7d');
+            el7.textContent = (mkt.price_change_7d_pct >= 0 ? '+' : '') + fmt(mkt.price_change_7d_pct) + '%';
+            el7.style.color = chgColor(mkt.price_change_7d_pct);
+            var el30 = document.getElementById('btc-30d');
+            el30.textContent = (mkt.price_change_30d_pct >= 0 ? '+' : '') + fmt(mkt.price_change_30d_pct) + '%';
+            el30.style.color = chgColor(mkt.price_change_30d_pct);
+            document.getElementById('btc-vol').textContent = mkt.total_volume_24h ? '$' + (mkt.total_volume_24h / 1e9).toFixed(1) + 'B' : '--';
+
+            // Support / Resistance
+            var sr = cd.support_resistance || {};
+            var srHtml = '';
+            (sr.supports || []).forEach(function(s) {
+                srHtml += '<div class="sr-level sr-support"><span>SUPORTE $' + fmt(s.price) + '</span><span>' + s.touches + ' toques</span></div>';
+            });
+            (sr.resistances || []).forEach(function(r) {
+                srHtml += '<div class="sr-level sr-resistance"><span>RESISTENCIA $' + fmt(r.price) + '</span><span>' + r.touches + ' toques</span></div>';
+            });
+            document.getElementById('sr-levels').innerHTML = srHtml || '<div style="color:#484f58;text-align:center;">Sem dados</div>';
+
+            // Macro events
+            var events = cd.macro_events || [];
+            var evHtml = '';
+            events.forEach(function(e) {
+                var cls = e.days_until <= 2 ? 'urgent' : e.days_until <= 7 ? 'soon' : 'safe';
+                evHtml += '<div class="event-item ' + cls + '"><span>' + e.event + ' (' + e.date + ')</span><span>' + e.days_until + ' dias</span></div>';
+            });
+            document.getElementById('macro-events').innerHTML = evHtml || '<div style="color:#484f58;text-align:center;">Sem eventos proximos</div>';
+
+            // News
+            var news = cd.news || [];
+            var newsHtml = '';
+            news.forEach(function(n) {
+                var cls = n.sentiment === 'positive' ? 'safe' : n.sentiment === 'negative' ? 'urgent' : 'soon';
+                var emoji = n.sentiment === 'positive' ? '+' : n.sentiment === 'negative' ? '-' : '~';
+                newsHtml += '<div class="event-item ' + cls + '"><span>[' + emoji + '] ' + n.title + '</span><span style="min-width:80px;text-align:right;">' + (n.source || '') + '</span></div>';
+            });
+            document.getElementById('news-list').innerHTML = newsHtml || '<div style="color:#484f58;text-align:center;">Sem noticias</div>';
+
+            // AI Decision
+            document.getElementById('ai-decision-text').textContent = rec.reason || '--';
+            var sigEl = document.getElementById('ai-signal');
+            var sig = (rec.signal || '--').toUpperCase();
+            sigEl.textContent = sig;
+            sigEl.style.color = sig === 'LONG' ? '#3fb950' : sig === 'SHORT' ? '#f85149' : '#8b949e';
+            var outEl = document.getElementById('ai-outlook');
+            var out = (rec.market_outlook || '--').toUpperCase();
+            outEl.textContent = out;
+            outEl.style.color = out === 'BULLISH' ? '#3fb950' : out === 'BEARISH' ? '#f85149' : '#d29922';
+            document.getElementById('ai-conf').textContent = (rec.confidence || '?') + '/10';
+            var riskEl = document.getElementById('ai-risk');
+            var risk = (rec.risk_level || '--').toUpperCase();
+            riskEl.textContent = risk;
+            riskEl.style.color = risk === 'HIGH' ? '#f85149' : risk === 'MEDIUM' ? '#d29922' : '#3fb950';
+            document.getElementById('ai-sl').textContent = dt.stop_loss > 0 ? '$' + fmt(dt.stop_loss) : '--';
+            document.getElementById('ai-t1').textContent = dt.target_1 > 0 ? '$' + fmt(dt.target_1) : '--';
+            document.getElementById('ai-t2').textContent = dt.target_2 > 0 ? '$' + fmt(dt.target_2) : '--';
+            document.getElementById('ai-tr').textContent = dt.reason || '--';
+        }
+
+        fetchAI();
+        setInterval(fetchAI, 10000);
+    </script>
+</body>
+</html>

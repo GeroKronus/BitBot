@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+data/
+*.jsonl
+config.json
+config_paper_v3.json
+gridbot.service
+gridbot-v3paper.service
+.env

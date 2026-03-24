@@ -1,0 +1,19 @@
+[Unit]
+Description=BitBot Grid Trading Bot
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/gridbot
+ExecStart=/usr/bin/python3 -m gridbot.main
+Restart=always
+RestartSec=30
+Environment=PYTHONUNBUFFERED=1
+Environment=AWS_ACCESS_KEY_ID=YOUR_KEY
+Environment=AWS_SECRET_ACCESS_KEY=YOUR_SECRET
+Environment=AWS_REGION=us-east-1
+
+[Install]
+WantedBy=multi-user.target

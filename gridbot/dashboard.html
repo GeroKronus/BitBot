@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BitBot Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: #0d1117;
+            color: #e6edf3;
+            min-height: 100vh;
+        }
+        .header {
+            background: linear-gradient(135deg, #161b22, #1a1f2b);
+            border-bottom: 1px solid #30363d;
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .header h1 { font-size: 22px; font-weight: 600; color: #f0883e; }
+        .header h1 span { color: #e6edf3; font-weight: 400; }
+        .header-right { display: flex; align-items: center; gap: 12px; }
+        .status-badge { padding: 4px 12px; border-radius: 12px; font-size: 13px; font-weight: 600; }
+        .status-running { background: #23863620; color: #3fb950; border: 1px solid #23863650; }
+        .status-paused { background: #d2992220; color: #d29922; border: 1px solid #d2992250; }
+        .status-error { background: #f8514920; color: #f85149; border: 1px solid #f8514950; }
+        .leverage-badge { padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 700; background: #58a6ff20; color: #58a6ff; border: 1px solid #58a6ff50; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-bottom: 20px; }
+        .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; }
+        .card-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #8b949e; margin-bottom: 12px; }
+        .big-number { font-size: 32px; font-weight: 700; line-height: 1.2; }
+        .big-number.green { color: #3fb950; }
+        .big-number.red { color: #f85149; }
+        .big-number.orange { color: #f0883e; }
+        .big-number.blue { color: #58a6ff; }
+        .big-number.purple { color: #a371f7; }
+        .sub-text { font-size: 13px; color: #8b949e; margin-top: 4px; }
+        .stat-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #21262d; }
+        .stat-row:last-child { border-bottom: none; }
+        .stat-label { color: #8b949e; font-size: 14px; }
+        .stat-value { font-weight: 600; font-size: 14px; }
+        .grid-visual { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+        .grid-visual .card-title { margin-bottom: 16px; }
+        .grid-bar-container { position: relative; height: 60px; margin: 20px 0; }
+        .grid-bar { position: absolute; top: 50%; left: 5%; right: 5%; height: 4px; background: #30363d; transform: translateY(-50%); border-radius: 2px; }
+        .grid-marker { position: absolute; top: 50%; width: 10px; height: 24px; border-radius: 3px; transform: translate(-50%, -50%); cursor: pointer; transition: height 0.2s; }
+        .grid-marker:hover { height: 32px; }
+        .grid-marker.buy { background: #3fb950; }
+        .grid-marker.sell { background: #f85149; }
+        .grid-marker.price { background: #f0883e; width: 3px; height: 40px; z-index: 2; }
+        .grid-legend { display: flex; gap: 20px; justify-content: center; margin-top: 8px; }
+        .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #8b949e; }
+        .legend-dot { width: 10px; height: 10px; border-radius: 2px; }
+        .risk-card { position: relative; overflow: hidden; }
+        .risk-indicator { position: absolute; top: 0; right: 0; width: 8px; height: 100%; }
+        .risk-safe { background: #238636; }
+        .risk-trailing { background: #d29922; }
+        .risk-danger { background: #f85149; }
+        .pnl-positive { color: #3fb950; }
+        .pnl-negative { color: #f85149; }
+        .footer { text-align: center; padding: 16px; color: #484f58; font-size: 12px; }
+        .update-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #3fb950; margin-right: 6px; animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        .trade-log { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; margin-bottom: 20px; max-height: 300px; overflow-y: auto; }
+        .trade-entry { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-radius: 4px; margin-bottom: 4px; font-size: 13px; }
+        .trade-entry.buy { background: #3fb95010; border-left: 3px solid #3fb950; }
+        .trade-entry.sell { background: #f8514910; border-left: 3px solid #f85149; }
+        .no-trades { color: #484f58; text-align: center; padding: 20px; }
+        .commands-bar { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px 20px; margin-bottom: 20px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+        .cmd-btn { padding: 6px 16px; border-radius: 6px; border: 1px solid #30363d; background: #21262d; color: #e6edf3; cursor: pointer; font-size: 13px; transition: all 0.15s; }
+        .cmd-btn:hover { background: #30363d; border-color: #8b949e; }
+        .cmd-btn.danger { border-color: #f8514950; }
+        .cmd-btn.danger:hover { background: #f8514920; }
+        .ai-card { border-left: 3px solid #a371f7; margin-bottom: 20px; }
+        .ai-section { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; }
+        @media (max-width: 600px) { .ai-section { grid-template-columns: 1fr; } }
+        .ai-technical { background: #21262d; border-radius: 6px; padding: 12px; font-size: 13px; }
+        .ai-technical .label { color: #8b949e; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .ai-technical .value { font-weight: 600; margin-top: 2px; }
+        .outlook-badge { display: inline-block; padding: 4px 12px; border-radius: 6px; font-size: 14px; font-weight: 700; margin-right: 8px; }
+        .outlook-bullish { background: #3fb95020; color: #3fb950; }
+        .outlook-bearish { background: #f8514920; color: #f85149; }
+        .outlook-neutral { background: #d2992220; color: #d29922; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>BitBot <span>Grid Trading</span></h1>
+        <div class="header-right">
+            <span class="update-dot"></span>
+            <span id="leverage-badge" class="leverage-badge">--x</span>
+            <span id="status-badge" class="status-badge status-running">RUNNING</span>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="commands-bar">
+            <span style="color: #8b949e; font-size: 13px; margin-right: 8px;">Commands:</span>
+            <button class="cmd-btn" onclick="sendCmd('status')">Status</button>
+            <button class="cmd-btn" onclick="sendCmd('pnl')">P&L Report</button>
+            <button class="cmd-btn" onclick="sendCmd('pause')">Pause</button>
+            <button class="cmd-btn" onclick="sendCmd('resume')">Resume</button>
+            <button class="cmd-btn danger" onclick="sendCmd('reset')">Reset Grid</button>
+            <a href="/trades-dashboard" class="cmd-btn" style="text-decoration:none; background:#3fb95020; border-color:#3fb95050; color:#3fb950;">Trades</a>
+            <a href="/ai-dashboard" class="cmd-btn" style="text-decoration:none; background:#a371f720; border-color:#a371f750; color:#a371f7;">AI Analyst</a>
+        </div>
+
+        <!-- Main stats -->
+        <div class="grid">
+            <div class="card">
+                <div class="card-title">BTC Price</div>
+                <div class="big-number orange" id="current-price">--</div>
+                <div class="sub-text">Base: <span id="base-price">--</span> | Dev: <span id="price-dev">--</span></div>
+            </div>
+            <div class="card">
+                <div class="card-title">P&L Global</div>
+                <div class="big-number" id="realized-pnl">--</div>
+                <div class="sub-text">Trades: <span id="trade-count">0</span></div>
+            </div>
+            <div class="card">
+                <div class="card-title">Position</div>
+                <div class="big-number" id="position-direction" style="font-size: 26px;">--</div>
+                <div class="sub-text"><span id="position-btc">0</span> BTC | Unrealized: <span id="unrealized-pnl-small">--</span></div>
+            </div>
+            <div class="card">
+                <div class="card-title">Balance (USDC)</div>
+                <div class="big-number blue" id="balance-usdt">--</div>
+                <div class="sub-text">Free: $<span id="balance-free">--</span> | Entrada: $126.22 | <span id="balance-diff">--</span></div>
+            </div>
+        </div>
+
+        <!-- Position Detail -->
+        <div id="position-card" class="card" style="margin-bottom: 20px; border-left: 3px solid #f0883e; display: none;">
+            <div class="card-title" style="color: #f0883e;">Open Position</div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 12px;">
+                <div class="ai-technical">
+                    <div class="label">Side</div>
+                    <div class="value" id="pos-side" style="font-size: 18px; font-weight: 700;">--</div>
+                </div>
+                <div class="ai-technical">
+                    <div class="label">Entry Price</div>
+                    <div class="value" id="pos-entry">--</div>
+                </div>
+                <div class="ai-technical">
+                    <div class="label">Size</div>
+                    <div class="value" id="pos-size">--</div>
+                </div>
+                <div class="ai-technical">
+                    <div class="label">P&L</div>
+                    <div class="value" id="pos-pnl">--</div>
+                </div>
+                <div class="ai-technical">
+                    <div class="label">Stop Loss</div>
+                    <div class="value" id="pos-stop" style="color: #f85149;">--</div>
+                </div>
+                <div class="ai-technical">
+                    <div class="label">Target 1</div>
+                    <div class="value" id="pos-target1" style="color: #3fb950;">--</div>
+                </div>
+                <div class="ai-technical">
+                    <div class="label">Target 2</div>
+                    <div class="value" id="pos-target2" style="color: #3fb950;">--</div>
+                </div>
+                <div class="ai-technical">
+                    <div class="label">Current P&L %</div>
+                    <div class="value" id="pos-pnl-pct">--</div>
+                </div>
+            </div>
+            <div id="pos-targets-reason" style="font-size: 12px; color: #8b949e; font-style: italic; margin-top: 4px;">AI updates targets every 5 min</div>
+            <!-- Progress bar: stop loss ← entry → targets -->
+            <div style="position: relative; height: 30px; background: #21262d; border-radius: 4px; overflow: hidden; margin-top: 8px;">
+                <div id="pos-progress" style="position: absolute; top: 0; height: 100%; background: linear-gradient(90deg, #f8514930, #3fb95030); transition: width 0.3s;"></div>
+                <div id="pos-marker" style="position: absolute; top: 0; width: 3px; height: 100%; background: #f0883e; transition: left 0.3s;"></div>
+                <div style="position: absolute; left: 0; top: 50%; transform: translateY(-50%); font-size: 10px; color: #f85149; padding: 0 4px;">SL</div>
+                <div style="position: absolute; right: 0; top: 50%; transform: translateY(-50%); font-size: 10px; color: #3fb950; padding: 0 4px;">T2</div>
+            </div>
+        </div>
+
+        <!-- AI Analyst -->
+        <div class="card ai-card">
+            <div class="card-title" style="color: #a371f7;">AI Market Analyst (Claude Haiku 3.5)</div>
+            <div style="margin: 8px 0;">
+                <span id="ai-outlook-badge" class="outlook-badge outlook-neutral">--</span>
+                <span id="ai-confidence-inline" style="color: #8b949e; font-size: 13px;">Confidence: --</span>
+                <span id="ai-next-inline" style="color: #484f58; font-size: 12px; margin-left: 12px;">Next: --</span>
+            </div>
+            <div id="ai-reason" style="font-size: 13px; color: #c9d1d9; margin-bottom: 4px;">Waiting for first analysis...</div>
+            <div id="ai-technical" style="font-size: 13px; color: #8b949e; font-style: italic; margin-bottom: 12px;"></div>
+            <div class="ai-section">
+                <div>
+                    <div class="stat-row"><span class="stat-label">Risk Level</span><span class="stat-value" id="ai-risk">--</span></div>
+                    <div class="stat-row"><span class="stat-label">Action</span><span class="stat-value" id="ai-action">--</span></div>
+                    <div class="stat-row"><span class="stat-label">Rebase Grid</span><span class="stat-value" id="ai-rebase">--</span></div>
+                </div>
+                <div>
+                    <div class="stat-row"><span class="stat-label">Rec. Spacing</span><span class="stat-value" id="ai-spacing">--</span></div>
+                    <div class="stat-row"><span class="stat-label">Rec. Leverage</span><span class="stat-value" id="ai-leverage">--</span></div>
+                    <div class="stat-row"><span class="stat-label">Rec. Stop Loss</span><span class="stat-value" id="ai-stoploss">--</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Grid visualization -->
+        <div class="grid-visual">
+            <div class="card-title">Grid Levels</div>
+            <div class="grid-bar-container">
+                <div class="grid-bar"></div>
+                <div id="grid-markers"></div>
+            </div>
+            <div class="grid-legend">
+                <div class="legend-item"><div class="legend-dot" style="background:#3fb950"></div> Buy Orders</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#f85149"></div> Sell Orders</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#f0883e"></div> Current Price</div>
+            </div>
+        </div>
+
+        <!-- Details grid -->
+        <div class="grid">
+            <div class="card risk-card">
+                <div id="risk-indicator" class="risk-indicator risk-safe"></div>
+                <div class="card-title">Risk Management</div>
+                <div class="stat-row"><span class="stat-label">Stop Loss</span><span class="stat-value" id="stop-loss-pct">--</span></div>
+                <div class="stat-row"><span class="stat-label">Trailing Profit</span><span class="stat-value" id="trailing-profit-pct">--</span></div>
+                <div class="stat-row"><span class="stat-label">Trailing Active</span><span class="stat-value" id="trailing-active">No</span></div>
+                <div class="stat-row"><span class="stat-label">Trailing High</span><span class="stat-value" id="trailing-high">--</span></div>
+                <div class="stat-row"><span class="stat-label">Trailing Stop</span><span class="stat-value" id="trailing-stop">--</span></div>
+            </div>
+            <div class="card">
+                <div class="card-title">Grid Config</div>
+                <div class="stat-row"><span class="stat-label">Mode</span><span class="stat-value" id="mode">--</span></div>
+                <div class="stat-row"><span class="stat-label">Leverage</span><span class="stat-value" id="leverage-val">--</span></div>
+                <div class="stat-row"><span class="stat-label">Grid Levels</span><span class="stat-value" id="grid-levels">--</span></div>
+                <div class="stat-row"><span class="stat-label">Spacing</span><span class="stat-value" id="grid-spacing">--</span></div>
+                <div class="stat-row"><span class="stat-label">Order Size</span><span class="stat-value" id="order-size">--</span></div>
+                <div class="stat-row"><span class="stat-label">Uptime</span><span class="stat-value" id="uptime">--</span></div>
+            </div>
+            <div class="card">
+                <div class="card-title">Orders</div>
+                <div class="stat-row"><span class="stat-label">Buy Orders</span><span class="stat-value pnl-positive" id="buy-orders">--</span></div>
+                <div class="stat-row"><span class="stat-label">Sell Orders</span><span class="stat-value pnl-negative" id="sell-orders">--</span></div>
+                <div class="stat-row"><span class="stat-label">Exchange Total</span><span class="stat-value" id="exchange-orders">--</span></div>
+                <div class="stat-row"><span class="stat-label">Avg Entry</span><span class="stat-value" id="avg-entry">--</span></div>
+                <div class="stat-row"><span class="stat-label">Total P&L</span><span class="stat-value" id="total-pnl">--</span></div>
+            </div>
+        </div>
+
+    </div>
+
+    <div class="footer">BitBot v2.0 — AI-Powered Grid Trading — Auto-refresh 5s</div>
+
+    <script>
+        const API = window.location.origin;
+        let lastData = null;
+
+        function fmt(n, decimals = 2) {
+            return n.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+        }
+        function pnlClass(val) { return val >= 0 ? 'pnl-positive' : 'pnl-negative'; }
+        function pnlColor(val) { return val >= 0 ? 'green' : 'red'; }
+
+        var failCount = 0;
+        async function fetchData() {
+            try {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 15000);
+                const res = await fetch(API + '/api', {signal: controller.signal});
+                clearTimeout(timeout);
+                const data = await res.json();
+                lastData = data;
+                failCount = 0;
+                updateUI(data);
+            } catch (e) {
+                failCount++;
+                if (failCount >= 3) {
+                    document.getElementById('status-badge').className = 'status-badge status-error';
+                    document.getElementById('status-badge').textContent = 'OFFLINE';
+                }
+            }
+        }
+
+        async function fetchTrades() {
+            try {
+                const res = await fetch(API + '/trades');
+                const data = await res.json();
+                updateTrades(data.trades || []);
+            } catch (e) {}
+        }
+
+        function updateUI(d) {
+            const badge = document.getElementById('status-badge');
+            if (d.paused) {
+                badge.className = 'status-badge status-paused';
+                badge.textContent = 'PAUSED';
+            } else {
+                badge.className = 'status-badge status-running';
+                badge.textContent = d.mode.toUpperCase();
+            }
+
+            // Leverage badge
+            var lev = d.config.leverage || 1;
+            document.getElementById('leverage-badge').textContent = lev + 'x';
+
+            // Price & deviation
+            document.getElementById('current-price').textContent = '$' + fmt(d.current_price);
+            document.getElementById('base-price').textContent = '$' + fmt(d.base_price);
+            var dev = ((d.current_price - d.base_price) / d.base_price * 100);
+            var devEl = document.getElementById('price-dev');
+            devEl.textContent = (dev >= 0 ? '+' : '') + dev.toFixed(2) + '%';
+            devEl.style.color = dev >= 0 ? '#3fb950' : '#f85149';
+
+            // P&L Global = (balance + unrealized) - investimento inicial
+            var stableTotal = d.balance.USDT || d.balance.USDC || 0;
+            var globalPnl = stableTotal + d.unrealized_pnl - 126.22;
+            const rpnlEl = document.getElementById('realized-pnl');
+            rpnlEl.textContent = (globalPnl >= 0 ? '+$' : '-$') + fmt(Math.abs(globalPnl));
+            rpnlEl.className = 'big-number ' + pnlColor(globalPnl);
+
+            const upnl = d.unrealized_pnl;
+            var upnlSmall = document.getElementById('unrealized-pnl-small');
+            upnlSmall.textContent = (upnl >= 0 ? '+$' : '-$') + fmt(Math.abs(upnl));
+            upnlSmall.style.color = upnl >= 0 ? '#3fb950' : '#f85149';
+
+            document.getElementById('trade-count').textContent = d.trade_count;
+            document.getElementById('position-btc').textContent = fmt(Math.abs(d.position_btc), 6);
+
+            // Position direction
+            var posEl = document.getElementById('position-direction');
+            var posValue = d.position_btc * d.current_price;
+            if (d.position_btc > 0.000001) {
+                posEl.textContent = 'LONG $' + fmt(Math.abs(posValue));
+                posEl.className = 'big-number green';
+                posEl.style.fontSize = '26px';
+            } else if (d.position_btc < -0.000001) {
+                posEl.textContent = 'SHORT $' + fmt(Math.abs(posValue));
+                posEl.className = 'big-number red';
+                posEl.style.fontSize = '26px';
+            } else {
+                posEl.textContent = 'FLAT';
+                posEl.className = 'big-number';
+                posEl.style.fontSize = '26px';
+                posEl.style.color = '#8b949e';
+            }
+
+            // Balance (stableTotal já calculado acima no P&L Global)
+            var stableFree = d.balance.USDC_free || stableTotal;
+            document.getElementById('balance-usdt').textContent = '$' + fmt(stableTotal);
+            document.getElementById('balance-free').textContent = fmt(stableFree);
+            var balancePct = (globalPnl / 126.22 * 100);
+            var bdEl = document.getElementById('balance-diff');
+            bdEl.textContent = (globalPnl >= 0 ? '+$' : '-$') + fmt(Math.abs(globalPnl)) + ' (' + (globalPnl >= 0 ? '+' : '') + balancePct.toFixed(2) + '%)';
+            bdEl.style.color = globalPnl >= 0 ? '#3fb950' : '#f85149';
+
+            // Config
+            document.getElementById('mode').textContent = d.mode.toUpperCase();
+            document.getElementById('leverage-val').textContent = lev + 'x';
+            document.getElementById('grid-levels').textContent = d.config.grid_levels + ' per side';
+            document.getElementById('grid-spacing').textContent = d.config.grid_spacing_pct + '%';
+            document.getElementById('order-size').textContent = '$' + fmt(d.config.order_size_usdt);
+            document.getElementById('uptime').textContent = d.uptime;
+
+            // Orders
+            document.getElementById('buy-orders').textContent = d.open_buy_orders;
+            document.getElementById('sell-orders').textContent = d.open_sell_orders;
+            document.getElementById('exchange-orders').textContent = d.exchange_orders !== undefined ? d.exchange_orders : '--';
+            document.getElementById('avg-entry').textContent = d.avg_entry > 0 ? '$' + fmt(d.avg_entry) : '--';
+            const totalEl = document.getElementById('total-pnl');
+            totalEl.textContent = (globalPnl >= 0 ? '+$' : '-$') + fmt(Math.abs(globalPnl));
+            totalEl.className = 'stat-value ' + pnlClass(globalPnl);
+
+            // Risk
+            document.getElementById('stop-loss-pct').textContent = d.config.stop_loss_pct + '%';
+            document.getElementById('trailing-profit-pct').textContent = d.config.trailing_profit_pct + '%';
+            document.getElementById('trailing-active').textContent = d.risk.trailing_active ? 'YES' : 'No';
+            document.getElementById('trailing-high').textContent = d.risk.trailing_high > 0 ? '$' + fmt(d.risk.trailing_high) : '--';
+            document.getElementById('trailing-stop').textContent = d.risk.trailing_stop_price > 0 ? '$' + fmt(d.risk.trailing_stop_price) : '--';
+            var riskInd = document.getElementById('risk-indicator');
+            riskInd.className = d.risk.trailing_active ? 'risk-indicator risk-trailing' : 'risk-indicator risk-safe';
+
+            updateGridVisual(d);
+
+            // Position Detail
+            var pd = d.position_detail;
+            var posCard = document.getElementById('position-card');
+            if (pd && pd.side !== 'flat' && pd.entry_price > 0) {
+                posCard.style.display = 'block';
+                var sideEl = document.getElementById('pos-side');
+                sideEl.textContent = pd.side.toUpperCase();
+                sideEl.style.color = pd.side === 'long' ? '#3fb950' : '#f85149';
+                document.getElementById('pos-entry').textContent = '$' + fmt(pd.entry_price);
+                document.getElementById('pos-size').textContent = fmt(pd.size_btc, 5) + ' BTC ($' + fmt(pd.size_usdc) + ')';
+                var pnlEl = document.getElementById('pos-pnl');
+                pnlEl.textContent = (pd.unrealized_pnl >= 0 ? '+$' : '-$') + fmt(Math.abs(pd.unrealized_pnl));
+                pnlEl.style.color = pd.unrealized_pnl >= 0 ? '#3fb950' : '#f85149';
+                document.getElementById('pos-stop').textContent = '$' + fmt(pd.stop_loss);
+                document.getElementById('pos-target1').textContent = '$' + fmt(pd.target_1);
+                document.getElementById('pos-target2').textContent = '$' + fmt(pd.target_2);
+                document.getElementById('pos-targets-reason').textContent = pd.targets_reason || 'AI updates targets every 5 min';
+                var pctEl = document.getElementById('pos-pnl-pct');
+                pctEl.textContent = (pd.pnl_pct >= 0 ? '+' : '') + pd.pnl_pct.toFixed(2) + '%';
+                pctEl.style.color = pd.pnl_pct >= 0 ? '#3fb950' : '#f85149';
+                // Progress bar
+                var range = pd.target_2 - pd.stop_loss;
+                if (range > 0) {
+                    var pos = (d.current_price - pd.stop_loss) / range * 100;
+                    pos = Math.max(0, Math.min(100, pos));
+                    document.getElementById('pos-marker').style.left = pos + '%';
+                }
+            } else {
+                posCard.style.display = 'none';
+            }
+
+            // AI Analyst
+            if (d.ai_analyst) {
+                var ai = d.ai_analyst;
+                var rec = ai.recommendation || {};
+                var outlook = (rec.market_outlook || '--').toUpperCase();
+
+                var obadge = document.getElementById('ai-outlook-badge');
+                obadge.textContent = outlook;
+                obadge.className = 'outlook-badge outlook-' + (rec.market_outlook || 'neutral');
+
+                document.getElementById('ai-confidence-inline').textContent = 'Confidence: ' + (rec.confidence || '?') + '/10';
+                document.getElementById('ai-next-inline').textContent = 'Next: ' + (ai.next_analysis_in || '--');
+                document.getElementById('ai-reason').textContent = rec.reason || 'Waiting...';
+                document.getElementById('ai-technical').textContent = rec.technical_summary || '';
+                document.getElementById('ai-risk').textContent = (rec.risk_level || '--').toUpperCase();
+                var riskEl = document.getElementById('ai-risk');
+                riskEl.style.color = rec.risk_level === 'high' ? '#f85149' : rec.risk_level === 'medium' ? '#d29922' : '#3fb950';
+                document.getElementById('ai-action').textContent = (rec.action || '--').toUpperCase();
+                document.getElementById('ai-rebase').textContent = rec.rebase_grid ? 'YES' : 'No';
+                document.getElementById('ai-spacing').textContent = rec.grid_spacing_pct ? rec.grid_spacing_pct + '%' : '--';
+                document.getElementById('ai-leverage').textContent = rec.leverage ? rec.leverage + 'x' : '--';
+                document.getElementById('ai-stoploss').textContent = rec.stop_loss_pct ? rec.stop_loss_pct + '%' : '--';
+            }
+        }
+
+        function updateGridVisual(d) {
+            const container = document.getElementById('grid-markers');
+            container.innerHTML = '';
+            const spacing = d.config.grid_spacing_pct / 100;
+            const levels = d.config.grid_levels;
+            const base = d.base_price || d.current_price;
+            if (!base || !levels || !spacing) return;
+            const allPrices = [];
+            for (let i = 1; i <= levels; i++) {
+                allPrices.push(base * (1 - spacing * i));
+                allPrices.push(base * (1 + spacing * i));
+            }
+            allPrices.push(d.current_price);
+            // Ensure minimum visual range of 2% around base
+            var minRange = base * 0.02;
+            var minP = Math.min(...allPrices);
+            var maxP = Math.max(...allPrices);
+            if (maxP - minP < minRange) {
+                var mid = (minP + maxP) / 2;
+                minP = mid - minRange / 2;
+                maxP = mid + minRange / 2;
+            }
+            const range = maxP - minP;
+            function pctPos(price) { return 5 + ((price - minP) / range) * 90; }
+            for (let i = 1; i <= levels; i++) {
+                const p = base * (1 - spacing * i);
+                const m = document.createElement('div');
+                m.className = 'grid-marker buy'; m.style.left = pctPos(p) + '%'; m.title = 'BUY $' + fmt(p);
+                container.appendChild(m);
+            }
+            for (let i = 1; i <= levels; i++) {
+                const p = base * (1 + spacing * i);
+                const m = document.createElement('div');
+                m.className = 'grid-marker sell'; m.style.left = pctPos(p) + '%'; m.title = 'SELL $' + fmt(p);
+                container.appendChild(m);
+            }
+            const pm = document.createElement('div');
+            pm.className = 'grid-marker price'; pm.style.left = pctPos(d.current_price) + '%'; pm.title = 'PRICE $' + fmt(d.current_price);
+            container.appendChild(pm);
+        }
+
+        function updateTrades(trades) {
+            const list = document.getElementById('trades-list');
+            if (!trades.length) {
+                list.innerHTML = '<div class="no-trades">No trades yet — waiting for price to hit grid levels...</div>';
+                return;
+            }
+            const recent = trades.filter(t => t.side !== 'error').slice(-20).reverse();
+            list.innerHTML = recent.map(t => {
+                const time = t.timestamp ? new Date(t.timestamp).toLocaleTimeString() : '';
+                const date = t.timestamp ? new Date(t.timestamp).toLocaleDateString() : '';
+                const pnl = t.side === 'sell' && t.pnl ? ` | P&L: ${t.pnl >= 0 ? '+' : ''}$${fmt(Math.abs(t.pnl))}` : '';
+                return `<div class="trade-entry ${t.side}">
+                    <span>${t.side.toUpperCase()} ${fmt(t.amount, 6)} BTC @ $${fmt(t.price)}</span>
+                    <span style="color:#8b949e">${date} ${time}${pnl}</span>
+                </div>`;
+            }).join('');
+        }
+
+        async function sendCmd(cmd) {
+            try {
+                await fetch(API + '/cmd/' + cmd, { method: 'POST' });
+                setTimeout(fetchData, 1000);
+            } catch (e) { alert('Failed to send command'); }
+        }
+
+        fetchData(); fetchTrades();
+        setInterval(fetchData, 10000);
+        setInterval(fetchTrades, 10000);
+    </script>
+</body>
+</html>

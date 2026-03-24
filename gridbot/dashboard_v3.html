@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BitBot v3 Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0d1117; color: #e6edf3; min-height: 100vh; }
+        .header { background: linear-gradient(135deg, #161b22, #1a1f2b); border-bottom: 1px solid #30363d; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+        .header h1 { font-size: 22px; font-weight: 600; color: #f0883e; }
+        .header h1 span { color: #e6edf3; font-weight: 400; }
+        .header-right { display: flex; align-items: center; gap: 10px; }
+        .badge { padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 700; }
+        .badge-green { background: #23863620; color: #3fb950; border: 1px solid #23863650; }
+        .badge-red { background: #f8514920; color: #f85149; border: 1px solid #f8514950; }
+        .badge-yellow { background: #d2992220; color: #d29922; border: 1px solid #d2992250; }
+        .badge-blue { background: #58a6ff20; color: #58a6ff; border: 1px solid #58a6ff50; }
+        .badge-purple { background: #a371f720; color: #a371f7; border: 1px solid #a371f750; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; margin-bottom: 18px; }
+        .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 18px; }
+        .card-title { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #8b949e; margin-bottom: 10px; }
+        .big-number { font-size: 28px; font-weight: 700; line-height: 1.2; }
+        .green { color: #3fb950; } .red { color: #f85149; } .orange { color: #f0883e; } .blue { color: #58a6ff; } .purple { color: #a371f7; } .yellow { color: #d29922; } .gray { color: #8b949e; }
+        .sub-text { font-size: 12px; color: #8b949e; margin-top: 4px; }
+        .stat-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #21262d; font-size: 13px; }
+        .stat-row:last-child { border-bottom: none; }
+        .stat-label { color: #8b949e; }
+        .stat-value { font-weight: 600; }
+        .nav-bar { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 10px 16px; margin-bottom: 18px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+        .nav-btn { padding: 5px 14px; border-radius: 6px; border: 1px solid #30363d; background: #21262d; color: #e6edf3; cursor: pointer; font-size: 12px; text-decoration: none; transition: all 0.15s; }
+        .nav-btn:hover { background: #30363d; border-color: #8b949e; }
+        .nav-btn.danger { border-color: #f8514950; }
+        .nav-btn.danger:hover { background: #f8514920; }
+        .nav-btn.accent-green { background: #3fb95020; border-color: #3fb95050; color: #3fb950; }
+        .nav-btn.accent-purple { background: #a371f720; border-color: #a371f750; color: #a371f7; }
+        /* Regime banner */
+        .regime-banner { padding: 10px 18px; border-radius: 8px; margin-bottom: 18px; display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+        .regime-range { background: #3fb95010; border: 1px solid #3fb95030; }
+        .regime-trend_up { background: #3fb95015; border: 1px solid #3fb95040; }
+        .regime-trend_down { background: #f8514915; border: 1px solid #f8514940; }
+        .regime-anomaly { background: #f8514925; border: 1px solid #f8514960; }
+        /* Position card */
+        .pos-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+        .pos-item { background: #21262d; border-radius: 6px; padding: 10px; }
+        .pos-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #8b949e; }
+        .pos-value { font-weight: 600; margin-top: 2px; font-size: 14px; }
+        /* Progress bar */
+        .progress-bar { position: relative; height: 24px; background: #21262d; border-radius: 4px; overflow: hidden; margin-top: 8px; }
+        .progress-marker { position: absolute; top: 0; width: 3px; height: 100%; background: #f0883e; transition: left 0.3s; }
+        .progress-label { position: absolute; top: 50%; transform: translateY(-50%); font-size: 9px; padding: 0 4px; }
+        /* Grid visual */
+        .grid-visual { position: relative; height: 50px; margin: 16px 0; }
+        .grid-bar { position: absolute; top: 50%; left: 5%; right: 5%; height: 3px; background: #30363d; transform: translateY(-50%); }
+        .grid-marker { position: absolute; top: 50%; width: 8px; height: 20px; border-radius: 3px; transform: translate(-50%, -50%); }
+        .grid-marker.buy { background: #3fb950; } .grid-marker.sell { background: #f85149; }
+        .grid-marker.price { background: #f0883e; width: 2px; height: 30px; z-index: 2; }
+        .footer { text-align: center; padding: 14px; color: #484f58; font-size: 11px; }
+        .update-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #3fb950; margin-right: 5px; animation: pulse 2s infinite; }
+        @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>BitBot <span>v3.0</span></h1>
+        <div class="header-right">
+            <span class="update-dot"></span>
+            <span id="leverage-badge" class="badge badge-blue">--x</span>
+            <span id="regime-badge" class="badge badge-green">--</span>
+            <span id="status-badge" class="badge badge-green">REAL</span>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Nav -->
+        <div class="nav-bar">
+            <span style="color:#8b949e;font-size:12px;margin-right:6px;">Commands:</span>
+            <button class="nav-btn" onclick="sendCmd('status')">Status</button>
+            <button class="nav-btn" onclick="sendCmd('pnl')">P&L</button>
+            <button class="nav-btn" onclick="sendCmd('pause')">Pause</button>
+            <button class="nav-btn" onclick="sendCmd('resume')">Resume</button>
+            <button class="nav-btn danger" onclick="sendCmd('reset')">Reset</button>
+            <a href="/trades-dashboard" class="nav-btn accent-green">Trades</a>
+            <a href="/ai-dashboard" class="nav-btn accent-purple">AI Analyst</a>
+        </div>
+
+        <!-- Regime banner -->
+        <div id="regime-banner" class="regime-banner regime-range">
+            <div>
+                <strong id="regime-text">RANGE</strong> —
+                <span id="regime-desc">Mercado lateral — grid pleno</span>
+            </div>
+            <div>
+                <span id="regime-confidence" style="color:#8b949e;">Confidence: --</span>
+                <span id="regime-duration" style="color:#484f58;margin-left:8px;">--</span>
+            </div>
+        </div>
+
+        <!-- Kill switch alert (hidden by default) -->
+        <div id="kill-alert" style="display:none;padding:12px 18px;background:#f8514925;border:2px solid #f85149;border-radius:8px;margin-bottom:18px;">
+            <strong style="color:#f85149;">KILL SWITCH ATIVO</strong>
+            <span id="kill-reason" style="color:#e6edf3;margin-left:8px;">--</span>
+            <span id="kill-cooldown" style="color:#d29922;margin-left:8px;">Cooldown: --</span>
+        </div>
+
+        <!-- Main stats -->
+        <div class="grid">
+            <div class="card">
+                <div class="card-title">BTC Price</div>
+                <div class="big-number orange" id="price">--</div>
+                <div class="sub-text">Base: <span id="base">--</span> | Dev: <span id="dev">--</span></div>
+            </div>
+            <div class="card">
+                <div class="card-title">P&L Global</div>
+                <div class="big-number" id="pnl">--</div>
+                <div class="sub-text">Trades: <span id="trades">0</span></div>
+            </div>
+            <div class="card">
+                <div class="card-title">Position</div>
+                <div class="big-number" id="position" style="font-size:24px;">FLAT</div>
+                <div class="sub-text"><span id="pos-btc">0</span> BTC | Unrealized: <span id="unrealized">--</span></div>
+            </div>
+            <div class="card">
+                <div class="card-title">Balance (USDC)</div>
+                <div class="big-number blue" id="balance">--</div>
+                <div class="sub-text">Free: $<span id="free">--</span> | <span id="result">--</span></div>
+            </div>
+        </div>
+
+        <!-- Position detail (shown when has position) -->
+        <div id="pos-card" class="card" style="margin-bottom:18px;border-left:3px solid #f0883e;display:none;">
+            <div class="card-title" style="color:#f0883e;">Open Position</div>
+            <div class="pos-grid">
+                <div class="pos-item"><div class="pos-label">Side</div><div class="pos-value" id="pd-side">--</div></div>
+                <div class="pos-item"><div class="pos-label">Entry</div><div class="pos-value" id="pd-entry">--</div></div>
+                <div class="pos-item"><div class="pos-label">Size</div><div class="pos-value" id="pd-size">--</div></div>
+                <div class="pos-item"><div class="pos-label">P&L</div><div class="pos-value" id="pd-pnl">--</div></div>
+                <div class="pos-item"><div class="pos-label">Stop Loss</div><div class="pos-value red" id="pd-sl">--</div></div>
+                <div class="pos-item"><div class="pos-label">Target 1</div><div class="pos-value green" id="pd-t1">--</div></div>
+                <div class="pos-item"><div class="pos-label">Target 2</div><div class="pos-value green" id="pd-t2">--</div></div>
+                <div class="pos-item"><div class="pos-label">P&L %</div><div class="pos-value" id="pd-pct">--</div></div>
+            </div>
+            <div id="pd-reason" style="font-size:11px;color:#8b949e;font-style:italic;margin-top:6px;"></div>
+            <div class="progress-bar">
+                <div id="pd-marker" class="progress-marker" style="left:50%;"></div>
+                <span class="progress-label" style="left:0;color:#f85149;">SL</span>
+                <span class="progress-label" style="right:0;color:#3fb950;">T2</span>
+            </div>
+        </div>
+
+        <!-- AI Analyst summary -->
+        <div class="card" style="margin-bottom:18px;border-left:3px solid #a371f7;">
+            <div class="card-title" style="color:#a371f7;">AI Market Analyst</div>
+            <div style="margin:6px 0;">
+                <span id="ai-outlook" class="badge badge-yellow">--</span>
+                <span id="ai-conf" style="color:#8b949e;font-size:12px;margin-left:8px;">--</span>
+                <span id="ai-next" style="color:#484f58;font-size:11px;margin-left:10px;">--</span>
+            </div>
+            <div id="ai-reason" style="font-size:13px;color:#c9d1d9;">Waiting...</div>
+        </div>
+
+        <!-- Grid visual -->
+        <div class="card" style="margin-bottom:18px;">
+            <div class="card-title">Grid Levels</div>
+            <div class="grid-visual">
+                <div class="grid-bar"></div>
+                <div id="markers"></div>
+            </div>
+            <div style="display:flex;gap:16px;justify-content:center;font-size:11px;color:#8b949e;">
+                <span><span style="color:#3fb950;">&#9632;</span> Buy</span>
+                <span><span style="color:#f85149;">&#9632;</span> Sell</span>
+                <span><span style="color:#f0883e;">&#9632;</span> Price</span>
+            </div>
+        </div>
+
+        <!-- Bottom cards -->
+        <div class="grid">
+            <div class="card">
+                <div class="card-title">Risk</div>
+                <div class="stat-row"><span class="stat-label">Stop Loss</span><span class="stat-value" id="r-sl">--</span></div>
+                <div class="stat-row"><span class="stat-label">Trailing</span><span class="stat-value" id="r-trail">--</span></div>
+                <div class="stat-row"><span class="stat-label">ATR</span><span class="stat-value" id="r-atr">--</span></div>
+                <div class="stat-row"><span class="stat-label">Cooldown</span><span class="stat-value" id="r-cool">--</span></div>
+            </div>
+            <div class="card">
+                <div class="card-title">Grid Config</div>
+                <div class="stat-row"><span class="stat-label">Mode</span><span class="stat-value" id="c-mode">--</span></div>
+                <div class="stat-row"><span class="stat-label">Leverage</span><span class="stat-value" id="c-lev">--</span></div>
+                <div class="stat-row"><span class="stat-label">Levels</span><span class="stat-value" id="c-lvl">--</span></div>
+                <div class="stat-row"><span class="stat-label">Spacing</span><span class="stat-value" id="c-spc">--</span></div>
+                <div class="stat-row"><span class="stat-label">Order Size</span><span class="stat-value" id="c-ord">--</span></div>
+                <div class="stat-row"><span class="stat-label">Uptime</span><span class="stat-value" id="c-up">--</span></div>
+            </div>
+            <div class="card">
+                <div class="card-title">Orders</div>
+                <div class="stat-row"><span class="stat-label">Buy Orders</span><span class="stat-value green" id="o-buys">--</span></div>
+                <div class="stat-row"><span class="stat-label">Sell Orders</span><span class="stat-value red" id="o-sells">--</span></div>
+                <div class="stat-row"><span class="stat-label">Exchange Total</span><span class="stat-value" id="o-exch">--</span></div>
+                <div class="stat-row"><span class="stat-label">Total P&L</span><span class="stat-value" id="o-pnl">--</span></div>
+            </div>
+        </div>
+
+        <!-- Exposure -->
+        <div class="card" style="margin-top:18px;" id="exposure-card">
+            <div class="card-title">Exposure & Drawdown</div>
+            <div class="stat-row"><span class="stat-label">Daily P&L</span><span class="stat-value" id="e-daily">--</span></div>
+            <div class="stat-row"><span class="stat-label">Daily Stopped</span><span class="stat-value" id="e-stopped">--</span></div>
+            <div class="stat-row"><span class="stat-label">Emergency</span><span class="stat-value" id="e-emerg">--</span></div>
+        </div>
+    </div>
+
+    <div class="footer">BitBot v3.0 — Adaptive Grid Trading — Auto-refresh 10s</div>
+
+    <script>
+        const API = window.location.origin;
+        var failCount = 0;
+        function fmt(n,d=2){return n?n.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}):'0.00';}
+
+        async function fetchData(){
+            try{
+                const c=new AbortController();
+                const t=setTimeout(()=>c.abort(),15000);
+                const r=await fetch(API+'/api',{signal:c.signal});
+                clearTimeout(t);
+                const d=await r.json();
+                failCount=0;
+                updateUI(d);
+            }catch(e){
+                failCount++;
+                if(failCount>=3){
+                    document.getElementById('status-badge').className='badge badge-red';
+                    document.getElementById('status-badge').textContent='OFFLINE';
+                }
+            }
+        }
+
+        function updateUI(d){
+            var p=d.current_price, bp=d.base_price, cfg=d.config;
+
+            // Header badges
+            document.getElementById('leverage-badge').textContent=cfg.leverage+'x';
+            var sb=document.getElementById('status-badge');
+            if(d.paused){sb.className='badge badge-yellow';sb.textContent='PAUSED';}
+            else{sb.className='badge badge-green';sb.textContent=d.mode.toUpperCase();}
+
+            // Regime
+            var reg=d.regime||{};
+            var regime=reg.regime||'RANGE';
+            var rb=document.getElementById('regime-badge');
+            rb.textContent=regime;
+            rb.className='badge '+(regime=='RANGE'?'badge-green':regime=='ANOMALY'?'badge-red':regime.includes('UP')?'badge-green':'badge-red');
+            var banner=document.getElementById('regime-banner');
+            banner.className='regime-banner regime-'+regime.toLowerCase();
+            document.getElementById('regime-text').textContent=regime;
+            var rules=reg.rules||{};
+            document.getElementById('regime-desc').textContent=rules.description||'';
+            document.getElementById('regime-confidence').textContent='Confidence: '+(reg.confidence?Math.round(reg.confidence*100)+'%':'--');
+            document.getElementById('regime-duration').textContent=reg.duration||'';
+
+            // Kill switch
+            var ks=d.kill_switch||{};
+            var killDiv=document.getElementById('kill-alert');
+            if(ks.cooling_down){
+                killDiv.style.display='block';
+                document.getElementById('kill-reason').textContent=ks.last_trigger_reason||'';
+                document.getElementById('kill-cooldown').textContent='Cooldown: '+ks.cooldown_remaining;
+            }else{killDiv.style.display='none';}
+
+            // Price
+            document.getElementById('price').textContent='$'+fmt(p);
+            document.getElementById('base').textContent='$'+fmt(bp);
+            var dev=bp>0?((p-bp)/bp*100):0;
+            var devEl=document.getElementById('dev');
+            devEl.textContent=(dev>=0?'+':'')+dev.toFixed(2)+'%';
+            devEl.style.color=dev>=0?'#3fb950':'#f85149';
+
+            // P&L Global
+            var bal=d.balance.USDT||d.balance.USDC||0;
+            var gPnl=bal+d.unrealized_pnl-126.22;
+            var pnlEl=document.getElementById('pnl');
+            pnlEl.textContent=(gPnl>=0?'+$':'-$')+fmt(Math.abs(gPnl));
+            pnlEl.className='big-number '+(gPnl>=0?'green':'red');
+            document.getElementById('trades').textContent=d.trade_count;
+
+            // Position
+            var posEl=document.getElementById('position');
+            var pv=d.position_btc*p;
+            if(d.position_btc>0.000001){posEl.textContent='LONG $'+fmt(Math.abs(pv));posEl.className='big-number green';posEl.style.fontSize='24px';}
+            else if(d.position_btc<-0.000001){posEl.textContent='SHORT $'+fmt(Math.abs(pv));posEl.className='big-number red';posEl.style.fontSize='24px';}
+            else{posEl.textContent='FLAT';posEl.className='big-number gray';posEl.style.fontSize='24px';}
+            document.getElementById('pos-btc').textContent=fmt(Math.abs(d.position_btc),5);
+            var uEl=document.getElementById('unrealized');
+            uEl.textContent=(d.unrealized_pnl>=0?'+$':'-$')+fmt(Math.abs(d.unrealized_pnl));
+            uEl.style.color=d.unrealized_pnl>=0?'#3fb950':'#f85149';
+
+            // Balance
+            var free=d.balance.USDC_free||bal;
+            document.getElementById('balance').textContent='$'+fmt(bal);
+            document.getElementById('free').textContent=fmt(free);
+            var pct=gPnl/126.22*100;
+            var rEl=document.getElementById('result');
+            rEl.textContent=(gPnl>=0?'+$':'-$')+fmt(Math.abs(gPnl))+' ('+(pct>=0?'+':'')+pct.toFixed(2)+'%)';
+            rEl.style.color=gPnl>=0?'#3fb950':'#f85149';
+
+            // Position detail
+            var pd=d.position_detail||{};
+            var pc=document.getElementById('pos-card');
+            if(pd.side!='flat'&&pd.entry_price>0){
+                pc.style.display='block';
+                var sEl=document.getElementById('pd-side');
+                sEl.textContent=pd.side.toUpperCase();sEl.style.color=pd.side=='long'?'#3fb950':'#f85149';
+                document.getElementById('pd-entry').textContent='$'+fmt(pd.entry_price);
+                document.getElementById('pd-size').textContent=fmt(pd.size_btc,5)+' ($'+fmt(pd.size_usdc)+')';
+                var ppEl=document.getElementById('pd-pnl');
+                ppEl.textContent=(pd.unrealized_pnl>=0?'+$':'-$')+fmt(Math.abs(pd.unrealized_pnl));
+                ppEl.style.color=pd.unrealized_pnl>=0?'#3fb950':'#f85149';
+                document.getElementById('pd-sl').textContent=pd.stop_loss>0?'$'+fmt(pd.stop_loss):'--';
+                document.getElementById('pd-t1').textContent=pd.target_1>0?'$'+fmt(pd.target_1):'--';
+                document.getElementById('pd-t2').textContent=pd.target_2>0?'$'+fmt(pd.target_2):'--';
+                var pcEl=document.getElementById('pd-pct');
+                pcEl.textContent=(pd.pnl_pct>=0?'+':'')+pd.pnl_pct.toFixed(2)+'%';
+                pcEl.style.color=pd.pnl_pct>=0?'#3fb950':'#f85149';
+                document.getElementById('pd-reason').textContent=pd.targets_reason||'';
+                if(pd.target_2>0&&pd.stop_loss>0){
+                    var range=pd.target_2-pd.stop_loss;
+                    if(range>0){var pos=(p-pd.stop_loss)/range*100;pos=Math.max(0,Math.min(100,pos));document.getElementById('pd-marker').style.left=pos+'%';}
+                }
+            }else{pc.style.display='none';}
+
+            // AI
+            var ai=d.ai_analyst||{};
+            var rec=ai.recommendation||{};
+            var outlook=(rec.outlook||rec.market_outlook||'--').toUpperCase();
+            var ob=document.getElementById('ai-outlook');
+            ob.textContent=outlook;
+            ob.className='badge '+(outlook=='BULLISH'?'badge-green':outlook=='BEARISH'?'badge-red':'badge-yellow');
+            document.getElementById('ai-conf').textContent='Confidence: '+(rec.confidence||'?')+'/10 | Risk: '+(rec.risk_level||'?').toUpperCase();
+            document.getElementById('ai-next').textContent='Next: '+(ai.next_analysis_in||'--');
+            document.getElementById('ai-reason').textContent=rec.reason||ai.last_report||'Waiting...';
+
+            // Grid visual
+            var mc=document.getElementById('markers');mc.innerHTML='';
+            var sp=cfg.grid_spacing_pct/100,lv=cfg.grid_levels,b=bp||p;
+            if(b&&lv&&sp){
+                var all=[];for(var i=1;i<=lv;i++){all.push(b*(1-sp*i));all.push(b*(1+sp*i));}all.push(p);
+                var mn=Math.min(...all),mx=Math.max(...all),mr=b*0.02;
+                if(mx-mn<mr){var mid=(mn+mx)/2;mn=mid-mr/2;mx=mid+mr/2;}
+                var rng=mx-mn;
+                function pp(pr){return 5+((pr-mn)/rng)*90;}
+                for(var i=1;i<=lv;i++){var pr=b*(1-sp*i);var m=document.createElement('div');m.className='grid-marker buy';m.style.left=pp(pr)+'%';m.title='BUY $'+fmt(pr);mc.appendChild(m);}
+                for(var i=1;i<=lv;i++){var pr=b*(1+sp*i);var m=document.createElement('div');m.className='grid-marker sell';m.style.left=pp(pr)+'%';m.title='SELL $'+fmt(pr);mc.appendChild(m);}
+                var pm=document.createElement('div');pm.className='grid-marker price';pm.style.left=pp(p)+'%';pm.title='$'+fmt(p);mc.appendChild(pm);
+            }
+
+            // Risk
+            var risk=d.risk||{};
+            document.getElementById('r-sl').textContent=risk.analyst_stop>0?'$'+fmt(risk.analyst_stop):(cfg.stop_loss_pct+'%');
+            document.getElementById('r-trail').textContent=risk.trailing_active?'ACTIVE @ $'+fmt(risk.trailing_stop_price):'No';
+            document.getElementById('r-atr').textContent=risk.atr>0?'$'+fmt(risk.atr):'--';
+            document.getElementById('r-cool').textContent=risk.cooldown_remaining||'none';
+
+            // Config
+            document.getElementById('c-mode').textContent=d.mode.toUpperCase();
+            document.getElementById('c-lev').textContent=cfg.leverage+'x';
+            document.getElementById('c-lvl').textContent=cfg.grid_levels+' per side';
+            document.getElementById('c-spc').textContent=cfg.grid_spacing_pct+'%';
+            document.getElementById('c-ord').textContent='$'+fmt(cfg.order_size_usdt);
+            document.getElementById('c-up').textContent=d.uptime;
+
+            // Orders
+            document.getElementById('o-buys').textContent=d.open_buy_orders;
+            document.getElementById('o-sells').textContent=d.open_sell_orders;
+            document.getElementById('o-exch').textContent=d.exchange_orders!==undefined?d.exchange_orders:'--';
+            var opEl=document.getElementById('o-pnl');
+            opEl.textContent=(gPnl>=0?'+$':'-$')+fmt(Math.abs(gPnl));
+            opEl.className='stat-value '+(gPnl>=0?'green':'red');
+
+            // Exposure
+            var exp=d.exposure||{};
+            document.getElementById('e-daily').textContent=exp.daily_pnl_pct?exp.daily_pnl_pct+'%':'--';
+            document.getElementById('e-stopped').textContent=exp.daily_stopped?'YES':'No';
+            document.getElementById('e-emerg').textContent=exp.emergency_stopped?'YES':'No';
+        }
+
+        async function sendCmd(cmd){
+            try{await fetch(API+'/cmd/'+cmd,{method:'POST'});setTimeout(fetchData,1000);}catch(e){alert('Failed');}
+        }
+
+        fetchData();
+        setInterval(fetchData,10000);
+    </script>
+</body>
+</html>
