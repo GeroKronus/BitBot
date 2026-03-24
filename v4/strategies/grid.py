@@ -38,6 +38,7 @@ class GridStrategy(IStrategy):
         self._active_buy_levels = []
         self._active_sell_levels = []
         self._last_profit_at = None
+        self._trade_pnls = []  # for health tracking
 
     def name(self) -> str:
         return "GRID"
@@ -49,8 +50,14 @@ class GridStrategy(IStrategy):
         if price <= 0:
             return signals
 
-        # ===== NO TRADE ZONE =====
-        # Market too dead — trades generate more fees than profit
+        # ===== NO TRADE ZONE (ChatGPT 3.2: "energy check") =====
+        # Skip if expected move < cost × 2 (not enough energy to profit)
+        round_trip_cost = (0.05 + 0.05) * 2  # 0.20%
+        expected_move = features.atr_pct if features.atr_pct > 0 else features.bb_bandwidth_pct / 2
+        if expected_move < round_trip_cost * 2 and expected_move > 0:
+            return signals  # not enough energy
+
+        # Also skip if BB too tight (original check)
         if features.bb_bandwidth_pct < 1.5 and features.bb_bandwidth_pct > 0:
             return signals
 
@@ -158,43 +165,56 @@ class GridStrategy(IStrategy):
         return signals
 
     def _calculate_spacing(self, features: Features) -> float:
-        """Dynamic spacing: max(ATR * k, spread * 2, cost * 3), clamped to min/max.
+        """Dynamic spacing with volatility regime adjustment.
 
-        ChatGPT: spacing must be >= (fee + slippage) * 3 to be profitable.
-        Below that = 'silent suicide' — every trade costs more than it earns.
+        Layers (all must be satisfied):
+        1. Cost floor: spacing >= round_trip_cost × 2.5
+        2. ATR-adaptive: ATR × k with volatility regime multiplier
+        3. Spread floor: spacing >= spread × 2
+        4. Clamped to min/max config
         """
-        # ATR-based spacing
-        atr_spacing = features.atr_pct * self.spacing_atr_k if features.atr_pct > 0 else 0.5
+        fee_pct = 0.05
+        slippage_pct = 0.05
+        round_trip_cost = (fee_pct + slippage_pct) * 2  # 0.20%
+        min_profitable = round_trip_cost * 2.5  # 0.50%
 
-        # Spread-based minimum (don't trade inside the spread)
+        # ATR-based with volatility regime multiplier (ChatGPT 3.1)
+        atr_spacing = features.atr_pct * self.spacing_atr_k if features.atr_pct > 0 else 0.5
+        if features.atr_pct < 0.8:
+            atr_spacing *= 1.5   # low vol → wider spacing (conservative)
+        elif features.atr_pct > 2.0:
+            atr_spacing *= 0.8   # high vol → tighter spacing (capture more moves)
+
+        # Spread floor
         spread_spacing = features.spread_pct * 2 if features.spread_pct > 0 else 0
 
-        # COST-BASED MINIMUM (the key fix — ChatGPT audit)
-        # fee ~0.05% + slippage ~0.05% = 0.10% per trade
-        # Need 3x cost to have real profit after round-trip
-        fee_pct = 0.05   # Hyperliquid taker
-        slippage_pct = 0.05  # estimated
-        cost_spacing = (fee_pct + slippage_pct) * 2 * 3  # round-trip × 3x margin
-        # = 0.10% * 2 (buy+sell) * 3 = 0.60%... but that's too conservative
-        # Actual: spacing needs to cover round-trip cost (buy fee + sell fee + slippage × 2)
-        # Round-trip cost = 2 × (fee + slippage) = 0.20%
-        # Minimum profitable spacing = 0.20% × 2.5 = 0.50%
-        min_profitable = (fee_pct + slippage_pct) * 2 * 2.5  # = 0.50%
-
-        # Use the LARGEST of all three
+        # Use the LARGEST
         spacing = max(atr_spacing, spread_spacing, min_profitable)
 
-        # Clamp to configured range
+        # Clamp
         spacing = max(self.min_spacing_pct, min(self.max_spacing_pct, spacing))
 
         return round(spacing, 2)
 
-    def record_profit(self):
-        """Called externally when a grid cycle completes with profit."""
+    def record_profit(self, pnl: float = 0, cost: float = 0):
+        """Called externally when a grid cycle completes."""
         self._last_profit_at = datetime.now(timezone.utc)
+        self._trade_pnls.append(pnl - cost)
+
+    def get_health(self) -> dict:
+        """Key metric: profit_per_trade_after_cost (ChatGPT 3.3)."""
+        if not self._trade_pnls:
+            return {"avg_profit_after_cost": 0, "trades": 0, "healthy": True}
+        avg = sum(self._trade_pnls) / len(self._trade_pnls)
+        return {
+            "avg_profit_after_cost": round(avg, 6),
+            "trades": len(self._trade_pnls),
+            "healthy": avg >= 0,  # positive = system working
+        }
 
     def reset(self):
         """Reset grid state (called on regime change or manual reset)."""
         self._base_price = 0.0
         self._active_buy_levels = []
         self._active_sell_levels = []
+        self._trade_pnls = []
