@@ -37,7 +37,8 @@ def _compute_size_multiplier(regime: RegimeState, governor: GovernorDecision,
     if low_energy:
         mult *= 0.3
 
-    return round(mult, 3)
+    # Hard floor/ceiling (auditor: prevent silent irrelevance or overflow)
+    return round(max(0.2, min(mult, 1.5)), 3)
 
 
 class GridStrategy(IStrategy):
@@ -63,7 +64,7 @@ class GridStrategy(IStrategy):
         signals = []
         price = features.sma_20 or features.bb_middle
         if price <= 0:
-            self._log_no_trade("No price data")
+            self._log_no_trade("No price data", regime.current)
             return signals
 
         # ===== 1. ENERGY CHECK =====
@@ -77,7 +78,7 @@ class GridStrategy(IStrategy):
 
         order_size = round(self.order_size_usdt * size_mult, 2)
         if order_size < 10:  # Hyperliquid minimum
-            self._log_no_trade(f"Order size too small: ${order_size:.2f}")
+            self._log_no_trade(f"Order size too small: ${order_size:.2f}", regime.current)
             return signals
 
         # ===== 3. COOLDOWN AFTER PROFIT =====
@@ -92,7 +93,7 @@ class GridStrategy(IStrategy):
         # ===== 5. ECONOMIC FILTER =====
         net_profit_per_cycle = spacing_pct - round_trip_cost
         if net_profit_per_cycle <= 0:
-            self._log_no_trade(f"Not profitable: spacing {spacing_pct}% <= cost {round_trip_cost}%")
+            self._log_no_trade(f"Not profitable: spacing {spacing_pct}% <= cost {round_trip_cost}%", regime.current)
             return signals
 
         # ===== 6. MICRO-TREND DETECTION =====
@@ -106,7 +107,15 @@ class GridStrategy(IStrategy):
             elif features.sma_slope_20 < -0.03 and features.momentum_1h < -0.2:
                 disable_buys = True   # micro downtrend: don't buy against it
 
-        # ===== 7. LEVELS =====
+        # ===== 7. INVENTORY LIMIT (auditor: prevent martingale) =====
+        # If position is too large in one direction, disable that side
+        max_inventory_usdt = governor.max_exposure_pct / 100 * 132 * 0.5  # 50% of max exposure
+        if position.side == "long" and position.notional > max_inventory_usdt:
+            disable_buys = True  # stop accumulating long
+        elif position.side == "short" and position.notional > max_inventory_usdt:
+            disable_sells = True  # stop accumulating short
+
+        # ===== 8. LEVELS =====
         levels = self.grid_levels
         if regime.current == "TREND_STRONG":
             levels = max(3, int(self.grid_levels * 0.5))  # reduce in strong trend only
@@ -178,32 +187,37 @@ class GridStrategy(IStrategy):
 
         return round(max(self.min_spacing_pct, min(self.max_spacing_pct, spacing)), 2)
 
-    def _log_no_trade(self, reason: str):
-        """Track reasons for not trading (auditor: log no-trade reasons)."""
+    def _log_no_trade(self, reason: str, regime: str = "UNKNOWN"):
+        """Track reasons for not trading, per regime (auditor: frequency per regime)."""
         self._no_trade_reasons.append({
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "reason": reason,
+            "regime": regime,
         })
-        # Keep last 50
-        self._no_trade_reasons = self._no_trade_reasons[-50:]
+        self._no_trade_reasons = self._no_trade_reasons[-100:]
 
     def record_profit(self, pnl: float = 0, cost: float = 0):
         self._last_profit_at = datetime.now(timezone.utc)
         self._trade_pnls.append(pnl - cost)
 
     def get_health(self) -> dict:
-        if not self._trade_pnls:
-            return {"avg_profit_after_cost": 0, "trades": 0, "healthy": True,
-                    "no_trade_reasons": len(self._no_trade_reasons),
-                    "last_no_trade": self._no_trade_reasons[-1]["reason"] if self._no_trade_reasons else ""}
-        avg = sum(self._trade_pnls) / len(self._trade_pnls)
-        return {
-            "avg_profit_after_cost": round(avg, 6),
+        # No-trade frequency per regime (auditor requirement)
+        from collections import Counter
+        regime_counts = Counter(r.get("regime", "?") for r in self._no_trade_reasons)
+
+        base = {
+            "avg_profit_after_cost": 0,
             "trades": len(self._trade_pnls),
-            "healthy": avg >= 0,
-            "no_trade_reasons": len(self._no_trade_reasons),
+            "healthy": True,
+            "no_trade_total": len(self._no_trade_reasons),
+            "no_trade_by_regime": dict(regime_counts),
             "last_no_trade": self._no_trade_reasons[-1]["reason"] if self._no_trade_reasons else "",
         }
+        if self._trade_pnls:
+            avg = sum(self._trade_pnls) / len(self._trade_pnls)
+            base["avg_profit_after_cost"] = round(avg, 6)
+            base["healthy"] = avg >= 0
+        return base
 
     def reset(self):
         self._base_price = 0.0

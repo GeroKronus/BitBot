@@ -137,6 +137,7 @@ async def run():
                     print(f"  Strategy error (non-fatal): {e}")
 
             # ========== 7. RISK FILTER ==========
+            # Auditor: risk failure is CRITICAL — strategy can fail, risk cannot
             approved = []
             if signals:
                 try:
@@ -144,7 +145,10 @@ async def run():
                         signals, position, features, regime_state, governor_decision
                     )
                 except Exception as e:
-                    print(f"  Risk error (non-fatal): {e}")
+                    print(f"  CRITICAL: Risk engine failure: {e}")
+                    # Risk failure = emergency — cancel all, don't execute signals
+                    execution.cancel_all()
+                    approved = []  # block all signals
 
             # ========== 8. EXECUTION ==========
             # Place new orders (limit orders go to pending book)
