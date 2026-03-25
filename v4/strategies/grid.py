@@ -99,21 +99,41 @@ class GridStrategy(IStrategy):
         # ===== 6. MICRO-TREND DETECTION =====
         # In RANGE or TREND_WEAK: disable one side if slight direction detected
         # In TREND_STRONG: strategy orchestrator handles (reduces size via multiplier)
+        # Micro-trend: REDUCE, don't disable (auditor: unified philosophy)
         disable_sells = False
         disable_buys = False
+        micro_sell_reduction = 1.0
+        micro_buy_reduction = 1.0
         if regime.current in ("RANGE", "TREND_WEAK"):
             if features.sma_slope_20 > 0.03 and features.momentum_1h > 0.2:
-                disable_sells = True  # micro uptrend: don't sell against it
+                micro_sell_reduction = 0.4  # reduce sells, don't disable
             elif features.sma_slope_20 < -0.03 and features.momentum_1h < -0.2:
-                disable_buys = True   # micro downtrend: don't buy against it
+                micro_buy_reduction = 0.4   # reduce buys, don't disable
 
-        # ===== 7. INVENTORY LIMIT (auditor: prevent martingale) =====
-        # If position is too large in one direction, disable that side
-        max_inventory_usdt = governor.max_exposure_pct / 100 * 132 * 0.5  # 50% of max exposure
-        if position.side == "long" and position.notional > max_inventory_usdt:
-            disable_buys = True  # stop accumulating long
-        elif position.side == "short" and position.notional > max_inventory_usdt:
-            disable_sells = True  # stop accumulating short
+        # ===== 7. INVENTORY SKEW (auditor: rebalance, not just hard stop) =====
+        # Skew grid toward closing position: more levels on opposite side
+        max_inventory_usdt = governor.max_exposure_pct / 100 * 132 * 0.5
+        inventory_ratio = 0.0  # -1 = max short, 0 = flat, +1 = max long
+        if position.side == "long" and max_inventory_usdt > 0:
+            inventory_ratio = min(position.notional / max_inventory_usdt, 1.0)
+        elif position.side == "short" and max_inventory_usdt > 0:
+            inventory_ratio = -min(position.notional / max_inventory_usdt, 1.0)
+
+        # Hard limit: disable accumulation side at 100%
+        if inventory_ratio >= 1.0:
+            disable_buys = True
+        elif inventory_ratio <= -1.0:
+            disable_sells = True
+
+        # Soft skew: reduce size on accumulation side, increase on closing side
+        buy_size_skew = 1.0
+        sell_size_skew = 1.0
+        if inventory_ratio > 0.3:  # long bias
+            buy_size_skew = max(0.3, 1.0 - inventory_ratio)   # reduce buys
+            sell_size_skew = min(1.5, 1.0 + inventory_ratio * 0.5)  # increase sells
+        elif inventory_ratio < -0.3:  # short bias
+            sell_size_skew = max(0.3, 1.0 + inventory_ratio)  # reduce sells
+            buy_size_skew = min(1.5, 1.0 - inventory_ratio * 0.5)  # increase buys
 
         # ===== 8. LEVELS =====
         levels = self.grid_levels
@@ -135,10 +155,11 @@ class GridStrategy(IStrategy):
         spacing = spacing_pct / 100
 
         for i in range(1, levels + 1):
-            # Buy levels
+            # Buy levels (with inventory skew)
             if current_exposure < max_exposure and not disable_buys:
                 buy_price = round(self._base_price * (1 - spacing * i), 1)
-                buy_amount = round(order_size / buy_price, 5) if buy_price > 0 else 0
+                skewed_size = round(order_size * buy_size_skew * micro_buy_reduction, 2)
+                buy_amount = round(skewed_size / buy_price, 5) if buy_price > 0 else 0
                 if buy_amount > 0 and buy_price > 0:
                     signals.append(Signal(
                         side="buy", price=buy_price, amount=buy_amount,
@@ -148,9 +169,11 @@ class GridStrategy(IStrategy):
                     ))
 
             # Sell levels
+            # Sell levels (with inventory skew)
             if not disable_sells:
                 sell_price = round(self._base_price * (1 + spacing * i), 1)
-                sell_amount = round(order_size / sell_price, 5) if sell_price > 0 else 0
+                skewed_sell = round(order_size * sell_size_skew * micro_sell_reduction, 2)
+                sell_amount = round(skewed_sell / sell_price, 5) if sell_price > 0 else 0
                 if sell_amount > 0 and sell_price > 0:
                     signals.append(Signal(
                         side="sell", price=sell_price, amount=sell_amount,
