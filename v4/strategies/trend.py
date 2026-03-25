@@ -43,7 +43,12 @@ class TrendStrategy(IStrategy):
         self._last_regime = ""
         self._trailing_high = 0.0
         self._trailing_low = 999999.0
-        self._candle_history = []  # recent closes for structure detection
+        self._candle_history = []
+
+        # Momentum safety guards (auditor)
+        self._momentum_trades_today = 0
+        self._momentum_cooldown_until = None
+        self._max_momentum_per_day = 3
 
     def name(self) -> str:
         return "TREND"
@@ -54,6 +59,12 @@ class TrendStrategy(IStrategy):
         price = features.sma_20 or 0
         if price <= 0:
             return signals
+
+        # ===== DAILY RESET =====
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if not hasattr(self, '_last_day') or self._last_day != today:
+            self._last_day = today
+            self._momentum_trades_today = 0
 
         # ===== REGIME CYCLE RESET =====
         if regime.current != self._last_regime:
@@ -198,8 +209,18 @@ class TrendStrategy(IStrategy):
         Size: 50% of normal (smaller = safer for momentum)
         Stop: tighter (1.0 * ATR instead of 1.5)
         """
+        # Momentum safety guards (auditor)
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        if self._momentum_cooldown_until and now < self._momentum_cooldown_until:
+            return None  # cooling down after momentum loss
+        if self._momentum_trades_today >= self._max_momentum_per_day:
+            return None  # daily limit reached
+
         # Only if price is far from SMA (pullback isn't coming)
-        if abs(features.price_vs_sma20_pct) < 0.5:
+        # Adaptive threshold based on volatility (auditor fix)
+        min_distance = max(0.5, features.atr_pct * 0.5)
+        if abs(features.price_vs_sma20_pct) < min_distance:
             return None  # still close to SMA, wait for pullback
 
         # Need acceleration in trend direction
@@ -272,6 +293,9 @@ class TrendStrategy(IStrategy):
                     position, price,
                     f"Trailing stop hit: ${trailing_stop:,.0f} (high was ${self._trailing_high:,.0f})"
                 ))
+                # Momentum cooldown: 30 min after loss (auditor guard)
+                self._momentum_cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=30)
+                self._momentum_trades_today += 1
 
             # Wrong side: trend reversed
             if not is_bullish and features.sma_slope_20 < -0.05:

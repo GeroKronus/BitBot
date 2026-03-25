@@ -58,7 +58,7 @@ async def run():
     risk_engine = RiskEngine({"capital": capital})
 
     orchestrator = StrategyOrchestrator({
-        "RANGE": GridStrategy({"grid_levels": 5, "order_size_usdt": 20}),
+        "RANGE": GridStrategy({"grid_levels": 7, "order_size_usdt": 15}),
         "TREND": TrendStrategy({}),
         "NO_TRADE": NoTradeStrategy(),
     })
@@ -123,21 +123,28 @@ async def run():
             # Only generate new grid signals if order book is empty or needs refresh
             needs_signals = True
             if mode != "real" and hasattr(execution, '_open_orders'):
-                if len(execution._open_orders) >= 4:  # already have grid orders pending
+                if len(execution._open_orders) >= 6:  # more room for 7 levels
                     needs_signals = False
 
+            signals = []
             if needs_signals:
-                signals = orchestrator.select_and_run(
-                    features, regime_state, position, governor_decision
-                )
-            else:
-                signals = []
+                try:
+                    signals = orchestrator.select_and_run(
+                        features, regime_state, position, governor_decision
+                    )
+                except Exception as e:
+                    # Auditor: exception in strategy must NOT kill the cycle
+                    print(f"  Strategy error (non-fatal): {e}")
 
             # ========== 7. RISK FILTER ==========
-            # Risk > Governor > Strategy (authority hierarchy)
-            approved = risk_engine.evaluate(
-                signals, position, features, regime_state, governor_decision
-            )
+            approved = []
+            if signals:
+                try:
+                    approved = risk_engine.evaluate(
+                        signals, position, features, regime_state, governor_decision
+                    )
+                except Exception as e:
+                    print(f"  Risk error (non-fatal): {e}")
 
             # ========== 8. EXECUTION ==========
             # Place new orders (limit orders go to pending book)

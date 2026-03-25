@@ -1,14 +1,11 @@
-"""GridStrategy — Mean reversion grid trading.
+"""GridStrategy — Micro-profit machine for lateral markets.
 
-Only active in RANGE (and TREND_WEAK with reduced size).
-Generates buy levels below price, sell levels above.
-
-Key improvements over v3:
-- Spacing based on max(ATR * k, spread * 2) — spread-aware
-- No trade zone: skip if BB bandwidth < 1.5% (market too dead)
-- Exposure cap integrated: won't generate buys if exposure > limit
-- Size adjusted by regime confidence
-- Cooldown after taking profit (avoid overtrading in euphoria)
+Philosophy: "ganha pouco mas sempre" (Caminho A)
+- 5-7 levels per side
+- Spacing 0.4%-0.6% (tighter = more trades)
+- Does NOT disable in weak trend — only in strong trend
+- Low energy mode: operates small instead of zero
+- Spread-aware, cost-aware, micro-trend aware
 """
 
 import math
@@ -16,29 +13,47 @@ from datetime import datetime, timezone, timedelta
 from ..core.interfaces import IStrategy, Features, RegimeState, Position, GovernorDecision, Signal
 
 
+# Centralized multiplier calculation (auditor: eliminate implicit dependencies)
+def _compute_size_multiplier(regime: RegimeState, governor: GovernorDecision,
+                             low_energy: bool) -> float:
+    """Single source of truth for order size multiplier."""
+    mult = 1.0
+
+    # Regime adjustment — only reduce in STRONG trend, not weak
+    if regime.current == "TREND_STRONG":
+        mult *= 0.4
+    elif regime.current == "TREND_WEAK":
+        mult *= 0.7
+    # RANGE: full size (1.0)
+
+    # Confidence scaling
+    mult *= (0.5 + 0.5 * regime.confidence)
+
+    # Governor max exposure
+    if governor.max_exposure_pct < 80:
+        mult *= governor.max_exposure_pct / 80.0
+
+    # Low energy mode
+    if low_energy:
+        mult *= 0.3
+
+    return round(mult, 3)
+
+
 class GridStrategy(IStrategy):
 
     def __init__(self, config: dict):
-        """
-        Config keys:
-            grid_levels: int (default 5)
-            order_size_usdt: float (default 20)
-            min_spacing_pct: float (default 0.3)
-            max_spacing_pct: float (default 2.0)
-            spacing_atr_k: float (default 0.8) — spacing = ATR * k
-        """
-        self.grid_levels = config.get("grid_levels", 5)
+        self.grid_levels = config.get("grid_levels", 7)         # 7 per side (was 5)
         self.order_size_usdt = config.get("order_size_usdt", 20.0)
-        self.min_spacing_pct = config.get("min_spacing_pct", 0.3)
-        self.max_spacing_pct = config.get("max_spacing_pct", 2.0)
-        self.spacing_atr_k = config.get("spacing_atr_k", 0.8)
+        self.min_spacing_pct = config.get("min_spacing_pct", 0.4)  # tighter (was 0.3)
+        self.max_spacing_pct = config.get("max_spacing_pct", 1.5)  # lower cap
+        self.spacing_atr_k = config.get("spacing_atr_k", 0.6)     # tighter ATR multiplier
 
         # State
         self._base_price = 0.0
-        self._active_buy_levels = []
-        self._active_sell_levels = []
         self._last_profit_at = None
-        self._trade_pnls = []  # for health tracking
+        self._trade_pnls = []
+        self._no_trade_reasons = []  # log why we don't trade
 
     def name(self) -> str:
         return "GRID"
@@ -48,176 +63,149 @@ class GridStrategy(IStrategy):
         signals = []
         price = features.sma_20 or features.bb_middle
         if price <= 0:
+            self._log_no_trade("No price data")
             return signals
 
-        # ===== LOW ENERGY MODE (auditor: "operate small instead of zero") =====
+        # ===== 1. ENERGY CHECK =====
         round_trip_cost = (0.05 + 0.05) * 2  # 0.20%
         expected_move = features.atr_pct if features.atr_pct > 0 else features.bb_bandwidth_pct / 2
-        low_energy = False
+        low_energy = (expected_move < round_trip_cost * 2 and expected_move > 0) or \
+                     (features.bb_bandwidth_pct < 1.0 and features.bb_bandwidth_pct > 0)
 
-        if (expected_move < round_trip_cost * 2 and expected_move > 0) or \
-           (features.bb_bandwidth_pct < 1.5 and features.bb_bandwidth_pct > 0):
-            # Instead of skipping entirely, operate with reduced size and wider spacing
-            low_energy = True
-            size_mult *= 0.3   # 30% size
-            # spacing will be widened by 1.2x below
-
-        # ===== COOLDOWN AFTER PROFIT =====
-        # Avoid overtrading in euphoria
-        if self._last_profit_at:
-            cooldown = timedelta(seconds=30)
-            if datetime.now(timezone.utc) - self._last_profit_at < cooldown:
-                return signals
-
-        # ===== CALCULATE DYNAMIC SPACING =====
-        spacing_pct = self._calculate_spacing(features)
-        if low_energy:
-            spacing_pct = round(spacing_pct * 1.2, 2)  # wider in low energy
-
-        # ===== ADJUST FOR REGIME AND CONFIDENCE =====
-        levels = self.grid_levels
-        size_mult = 1.0
-
-        if regime.current == "TREND_WEAK":
-            levels = max(2, int(self.grid_levels * 0.6))
-            size_mult = 0.6
-
-        # Scale by regime confidence
-        size_mult *= (0.5 + 0.5 * regime.confidence)
-
-        # Scale by governor max exposure
-        if governor.max_exposure_pct < 80:
-            size_mult *= governor.max_exposure_pct / 80.0
+        # ===== 2. SIZE MULTIPLIER (centralized — no more implicit deps) =====
+        size_mult = _compute_size_multiplier(regime, governor, low_energy)
 
         order_size = round(self.order_size_usdt * size_mult, 2)
         if order_size < 10:  # Hyperliquid minimum
+            self._log_no_trade(f"Order size too small: ${order_size:.2f}")
             return signals
 
-        # ===== MICRO-TREND DETECTION (ChatGPT: disable one side) =====
-        # If slight trend detected while still in RANGE, only trade WITH the trend
-        micro_trend_up = features.sma_slope_20 > 0.03 and features.momentum_1h > 0.3
-        micro_trend_down = features.sma_slope_20 < -0.03 and features.momentum_1h < -0.3
-        disable_sells = micro_trend_up   # don't sell against rising market
-        disable_buys = micro_trend_down  # don't buy against falling market
+        # ===== 3. COOLDOWN AFTER PROFIT =====
+        if self._last_profit_at:
+            cooldown = timedelta(seconds=20)  # shorter cooldown for micro-profit
+            if datetime.now(timezone.utc) - self._last_profit_at < cooldown:
+                return signals
 
-        # ===== EXPOSURE CHECK =====
+        # ===== 4. SPACING (dynamic, cost-aware) =====
+        spacing_pct = self._calculate_spacing(features, low_energy)
+
+        # ===== 5. ECONOMIC FILTER =====
+        net_profit_per_cycle = spacing_pct - round_trip_cost
+        if net_profit_per_cycle <= 0:
+            self._log_no_trade(f"Not profitable: spacing {spacing_pct}% <= cost {round_trip_cost}%")
+            return signals
+
+        # ===== 6. MICRO-TREND DETECTION =====
+        # In RANGE or TREND_WEAK: disable one side if slight direction detected
+        # In TREND_STRONG: strategy orchestrator handles (reduces size via multiplier)
+        disable_sells = False
+        disable_buys = False
+        if regime.current in ("RANGE", "TREND_WEAK"):
+            if features.sma_slope_20 > 0.03 and features.momentum_1h > 0.2:
+                disable_sells = True  # micro uptrend: don't sell against it
+            elif features.sma_slope_20 < -0.03 and features.momentum_1h < -0.2:
+                disable_buys = True   # micro downtrend: don't buy against it
+
+        # ===== 7. LEVELS =====
+        levels = self.grid_levels
+        if regime.current == "TREND_STRONG":
+            levels = max(3, int(self.grid_levels * 0.5))  # reduce in strong trend only
+
+        # ===== 8. EXPOSURE CHECK =====
         max_exposure = governor.max_exposure_pct / 100
         current_exposure = position.notional / (position.notional + 100) if position.notional > 0 else 0
 
-        # ===== SET BASE PRICE =====
+        # ===== 9. BASE PRICE =====
         if self._base_price == 0:
             self._base_price = price
-
-        # Rebase if price moved too far from base
         deviation = abs(price - self._base_price) / self._base_price
-        if deviation > 0.03:  # >3% deviation → rebase
+        if deviation > 0.025:  # rebase at 2.5% (tighter for micro-profit)
             self._base_price = price
 
-        # ===== ECONOMIC FILTER (ChatGPT: skip if net profit <= 0) =====
-        round_trip_cost_pct = (0.05 + 0.05) * 2  # (fee + slip) × 2 sides = 0.20%
-        net_profit_per_cycle = spacing_pct - round_trip_cost_pct
-        if net_profit_per_cycle <= 0:
-            return signals  # not profitable — don't trade
-
-        # ===== GENERATE GRID LEVELS =====
+        # ===== 10. GENERATE GRID =====
         spacing = spacing_pct / 100
 
         for i in range(1, levels + 1):
-            # Buy levels below (only if exposure and micro-trend allow)
+            # Buy levels
             if current_exposure < max_exposure and not disable_buys:
                 buy_price = round(self._base_price * (1 - spacing * i), 1)
                 buy_amount = round(order_size / buy_price, 5) if buy_price > 0 else 0
-
                 if buy_amount > 0 and buy_price > 0:
                     signals.append(Signal(
-                        side="buy",
-                        price=buy_price,
-                        amount=buy_amount,
-                        order_type="limit",
-                        source="GRID",
+                        side="buy", price=buy_price, amount=buy_amount,
+                        order_type="limit", source="GRID",
                         confidence=regime.confidence,
-                        metadata={
-                            "level": i,
-                            "spacing_pct": spacing_pct,
-                            "size_mult": size_mult,
-                        },
+                        metadata={"level": i, "spacing_pct": spacing_pct, "size_mult": size_mult},
                     ))
 
-            # Sell levels above (skip if micro-trend up)
-            if disable_sells:
-                continue
-
-            sell_price = round(self._base_price * (1 + spacing * i), 1)
-            sell_amount = round(order_size / sell_price, 5) if sell_price > 0 else 0
-
-            if sell_amount > 0 and sell_price > 0:
-                signals.append(Signal(
-                    side="sell",
-                    price=sell_price,
-                    amount=sell_amount,
-                    order_type="limit",
-                    source="GRID",
-                    confidence=regime.confidence,
-                    metadata={
-                        "level": i,
-                        "spacing_pct": spacing_pct,
-                        "size_mult": size_mult,
-                    },
-                ))
+            # Sell levels
+            if not disable_sells:
+                sell_price = round(self._base_price * (1 + spacing * i), 1)
+                sell_amount = round(order_size / sell_price, 5) if sell_price > 0 else 0
+                if sell_amount > 0 and sell_price > 0:
+                    signals.append(Signal(
+                        side="sell", price=sell_price, amount=sell_amount,
+                        order_type="limit", source="GRID",
+                        confidence=regime.confidence,
+                        metadata={"level": i, "spacing_pct": spacing_pct, "size_mult": size_mult},
+                    ))
 
         return signals
 
-    def _calculate_spacing(self, features: Features) -> float:
-        """Dynamic spacing with volatility regime adjustment.
-
-        Layers (all must be satisfied):
-        1. Cost floor: spacing >= round_trip_cost × 2.5
-        2. ATR-adaptive: ATR × k with volatility regime multiplier
-        3. Spread floor: spacing >= spread × 2
-        4. Clamped to min/max config
-        """
+    def _calculate_spacing(self, features: Features, low_energy: bool) -> float:
+        """Dynamic spacing: cost-aware, ATR-adaptive, volatility regime."""
         fee_pct = 0.05
         slippage_pct = 0.05
-        round_trip_cost = (fee_pct + slippage_pct) * 2  # 0.20%
-        min_profitable = round_trip_cost * 2.5  # 0.50%
+        round_trip_cost = (fee_pct + slippage_pct) * 2
+        min_profitable = round_trip_cost * 2.5
 
-        # ATR-based with volatility regime multiplier (ChatGPT 3.1)
+        # ATR-based with regime multiplier
         atr_spacing = features.atr_pct * self.spacing_atr_k if features.atr_pct > 0 else 0.5
         if features.atr_pct < 0.8:
-            atr_spacing *= 1.5   # low vol → wider spacing (conservative)
+            atr_spacing *= 1.3   # low vol: slightly wider
         elif features.atr_pct > 2.0:
-            atr_spacing *= 0.8   # high vol → tighter spacing (capture more moves)
+            atr_spacing *= 0.7   # high vol: tighter to capture more
 
         # Spread floor
         spread_spacing = features.spread_pct * 2 if features.spread_pct > 0 else 0
 
-        # Use the LARGEST
-        spacing = max(atr_spacing, spread_spacing, min_profitable)
+        # Low energy: wider + cost floor
+        if low_energy:
+            min_cost_spacing = round_trip_cost * 3.0
+            spacing = max(atr_spacing, spread_spacing, min_profitable, min_cost_spacing)
+        else:
+            spacing = max(atr_spacing, spread_spacing, min_profitable)
 
-        # Clamp
-        spacing = max(self.min_spacing_pct, min(self.max_spacing_pct, spacing))
+        return round(max(self.min_spacing_pct, min(self.max_spacing_pct, spacing)), 2)
 
-        return round(spacing, 2)
+    def _log_no_trade(self, reason: str):
+        """Track reasons for not trading (auditor: log no-trade reasons)."""
+        self._no_trade_reasons.append({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "reason": reason,
+        })
+        # Keep last 50
+        self._no_trade_reasons = self._no_trade_reasons[-50:]
 
     def record_profit(self, pnl: float = 0, cost: float = 0):
-        """Called externally when a grid cycle completes."""
         self._last_profit_at = datetime.now(timezone.utc)
         self._trade_pnls.append(pnl - cost)
 
     def get_health(self) -> dict:
-        """Key metric: profit_per_trade_after_cost (ChatGPT 3.3)."""
         if not self._trade_pnls:
-            return {"avg_profit_after_cost": 0, "trades": 0, "healthy": True}
+            return {"avg_profit_after_cost": 0, "trades": 0, "healthy": True,
+                    "no_trade_reasons": len(self._no_trade_reasons),
+                    "last_no_trade": self._no_trade_reasons[-1]["reason"] if self._no_trade_reasons else ""}
         avg = sum(self._trade_pnls) / len(self._trade_pnls)
         return {
             "avg_profit_after_cost": round(avg, 6),
             "trades": len(self._trade_pnls),
-            "healthy": avg >= 0,  # positive = system working
+            "healthy": avg >= 0,
+            "no_trade_reasons": len(self._no_trade_reasons),
+            "last_no_trade": self._no_trade_reasons[-1]["reason"] if self._no_trade_reasons else "",
         }
 
     def reset(self):
-        """Reset grid state (called on regime change or manual reset)."""
         self._base_price = 0.0
-        self._active_buy_levels = []
-        self._active_sell_levels = []
         self._trade_pnls = []
+        self._no_trade_reasons = []
